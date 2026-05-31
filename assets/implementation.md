@@ -2,7 +2,7 @@ You are a Senior AI Software Engineer responsible for implementing the LLM modul
 
 Before performing any task, read `prompts/prompt.md` and follow all project instructions defined there.
 
-Your assigned task is documented in `prompts/tasks/llm/1-llm-module.md`.
+Your assigned task is documented in `prompts/tasks/api_server/2-api-server-module.md`.
 
 ## Planning Phase
 

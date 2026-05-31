@@ -29,7 +29,8 @@ def test_custom_values():
     assert config.request_timeout == 30.0
 
 
-def test_missing_model_raises():
+def test_missing_model_raises(monkeypatch):
+    monkeypatch.delenv("DEFAULT_MODEL", raising=False)
     with pytest.raises(ValidationError):
         LLMConfig()
 
