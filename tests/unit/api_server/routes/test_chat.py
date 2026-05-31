@@ -1,6 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 
 from api_server.app import create_app
@@ -54,10 +53,21 @@ class TestChatCompletions:
             finish_reason="tool_calls",
         )
         client = _make_client(llm_response=llm_resp)
-        resp = client.post("/v1/chat/completions", json=_chat_payload(tools=[{
-            "type": "function",
-            "function": {"name": "search", "description": "Search", "parameters": {}},
-        }]))
+        resp = client.post(
+            "/v1/chat/completions",
+            json=_chat_payload(
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "search",
+                            "description": "Search",
+                            "parameters": {},
+                        },
+                    }
+                ]
+            ),
+        )
         assert resp.status_code == 200
         choices = resp.json()["choices"]
         assert choices[0]["finish_reason"] == "tool_calls"
@@ -69,7 +79,9 @@ class TestChatCompletions:
     def test_generation_params_passed_to_llm(self):
         config = APIServerConfig()
         mock_service = MagicMock()
-        mock_service.achat = AsyncMock(return_value=ChatResponse(content="ok", finish_reason="stop"))
+        mock_service.achat = AsyncMock(
+            return_value=ChatResponse(content="ok", finish_reason="stop")
+        )
         app = create_app(config=config, llm_service=mock_service)
         client = TestClient(app)
         client.post(

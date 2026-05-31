@@ -1,6 +1,5 @@
 import json
 
-import pytest
 
 from api_server.adapters.llm_to_openai import (
     convert_chat_response,
@@ -108,6 +107,7 @@ class TestConvertChatResponse:
 
     def test_created_is_unix_timestamp(self):
         import time
+
         before = int(time.time())
         result = convert_chat_response(ChatResponse(content="ok"), model="m")
         after = int(time.time())

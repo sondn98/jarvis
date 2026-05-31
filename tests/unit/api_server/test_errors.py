@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -70,7 +68,9 @@ def test_generic_exception_returns_500():
 
 
 def test_error_response_never_exposes_stack_trace():
-    client = _app_with_route(RuntimeError("secret internals"), raise_server_exceptions=False)
+    client = _app_with_route(
+        RuntimeError("secret internals"), raise_server_exceptions=False
+    )
     resp = client.get("/test")
     body = resp.text
     assert "Traceback" not in body

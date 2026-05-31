@@ -4,7 +4,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 
 from api_server.adapters.llm_to_openai import convert_chat_response
-from api_server.adapters.openai_to_llm import build_llm_kwargs, convert_messages, convert_tools
+from api_server.adapters.openai_to_llm import (
+    build_llm_kwargs,
+    convert_messages,
+    convert_tools,
+)
 from api_server.config import APIServerConfig
 from api_server.dependencies import get_config, get_llm_service, verify_api_key
 from api_server.errors import UnsupportedFeatureError
@@ -40,5 +44,8 @@ async def chat_completions(
     llm_response = await llm_service.achat(messages, tools=tools, **kwargs)
 
     response = convert_chat_response(llm_response, body.model)
-    logger.info("POST /v1/chat/completions complete: finish_reason=%s", response.choices[0].finish_reason)
+    logger.info(
+        "POST /v1/chat/completions complete: finish_reason=%s",
+        response.choices[0].finish_reason,
+    )
     return response

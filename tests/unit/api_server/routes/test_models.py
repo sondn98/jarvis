@@ -6,10 +6,16 @@ from api_server.app import create_app
 from api_server.config import APIServerConfig
 
 
-def _make_client(models: list[str] | None = None, enable_auth: bool = False, api_key: str | None = None):
+def _make_client(
+    models: list[str] | None = None,
+    enable_auth: bool = False,
+    api_key: str | None = None,
+):
     config = APIServerConfig(enable_api_key_auth=enable_auth, api_key=api_key)
     mock_service = MagicMock()
-    mock_service.alist_models = AsyncMock(return_value=models if models is not None else ["llama3.2", "mistral"])
+    mock_service.alist_models = AsyncMock(
+        return_value=models if models is not None else ["llama3.2", "mistral"]
+    )
     app = create_app(config=config, llm_service=mock_service)
     return TestClient(app)
 

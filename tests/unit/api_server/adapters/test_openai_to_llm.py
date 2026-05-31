@@ -1,5 +1,3 @@
-import pytest
-
 from api_server.adapters.openai_to_llm import (
     build_llm_kwargs,
     convert_message,
@@ -8,7 +6,12 @@ from api_server.adapters.openai_to_llm import (
     convert_tool,
     convert_tools,
 )
-from api_server.schemas.openai import ChatCompletionRequest, ChatMessage, Tool, ToolFunction
+from api_server.schemas.openai import (
+    ChatCompletionRequest,
+    ChatMessage,
+    Tool,
+    ToolFunction,
+)
 from llm.models import MessageRole
 
 
@@ -82,21 +85,31 @@ class TestConvertTool:
             function=ToolFunction(
                 name="search",
                 description="Search the web",
-                parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+                parameters={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
             ),
         )
         result = convert_tool(tool)
         assert result.name == "search"
         assert result.description == "Search the web"
-        assert result.parameters == {"type": "object", "properties": {"query": {"type": "string"}}}
+        assert result.parameters == {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        }
 
     def test_tool_with_no_description(self):
-        tool = Tool(type="function", function=ToolFunction(name="noop", description=None))
+        tool = Tool(
+            type="function", function=ToolFunction(name="noop", description=None)
+        )
         result = convert_tool(tool)
         assert result.description == ""
 
     def test_tool_with_no_parameters(self):
-        tool = Tool(type="function", function=ToolFunction(name="ping", description="Ping"))
+        tool = Tool(
+            type="function", function=ToolFunction(name="ping", description="Ping")
+        )
         result = convert_tool(tool)
         assert result.parameters == {}
 

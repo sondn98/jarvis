@@ -51,7 +51,9 @@ def convert_tools(tools: list[Tool]) -> list[ToolDefinition]:
     return [convert_tool(t) for t in tools]
 
 
-def build_llm_kwargs(request: ChatCompletionRequest, default_model: str | None) -> dict[str, Any]:
+def build_llm_kwargs(
+    request: ChatCompletionRequest, default_model: str | None
+) -> dict[str, Any]:
     """Extract generation parameters from an OpenAI request as LLM service kwargs."""
     model = request.model or default_model
     kwargs: dict[str, Any] = {}
