@@ -32,5 +32,4 @@ RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 
 EXPOSE 8000
-
 CMD ["python", "main.py"]
