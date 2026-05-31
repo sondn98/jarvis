@@ -1,7 +1,13 @@
+import os
+
 import pytest
 
 from llm.config import LLMConfig
 from llm.models import Message, MessageRole, ToolDefinition
+
+# Provide a default so main.py can be imported in tests without a .env file.
+# Tests that specifically exercise missing DEFAULT_MODEL use monkeypatch.delenv.
+os.environ.setdefault("DEFAULT_MODEL", "test-model")
 
 
 @pytest.fixture

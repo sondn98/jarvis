@@ -176,3 +176,27 @@ class OllamaProvider(BaseProvider):
         response = _build_chat_response(raw, response_model)
         logger.info("LLM async request complete: finish_reason=%s", response.finish_reason)
         return response
+
+    def list_models(self) -> list[str]:
+        logger.info("Listing available Ollama models")
+        try:
+            result = self._client.list()
+            return [m.model for m in result.models]
+        except ollama_sdk.ResponseError as exc:
+            logger.error("Provider error listing models: %s", exc)
+            raise ProviderError(str(exc)) from exc
+        except Exception as exc:
+            logger.error("Unexpected error listing models: %s", exc)
+            raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
+
+    async def alist_models(self) -> list[str]:
+        logger.info("Listing available Ollama models (async)")
+        try:
+            result = await self._async_client.list()
+            return [m.model for m in result.models]
+        except ollama_sdk.ResponseError as exc:
+            logger.error("Provider error listing models: %s", exc)
+            raise ProviderError(str(exc)) from exc
+        except Exception as exc:
+            logger.error("Unexpected error listing models: %s", exc)
+            raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc

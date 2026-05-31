@@ -59,3 +59,11 @@ class LLMService:
         """Async variant of generate."""
         messages = [Message(role=MessageRole.USER, content=prompt)]
         return await self.achat(messages, **kwargs)
+
+    def list_models(self) -> list[str]:
+        """Return names of models available from the configured provider."""
+        return self._provider.list_models()
+
+    async def alist_models(self) -> list[str]:
+        """Async variant of list_models."""
+        return await self._provider.alist_models()

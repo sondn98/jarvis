@@ -28,3 +28,11 @@ class BaseProvider(ABC):
         **kwargs: Any,
     ) -> ChatResponse:
         """Async variant of chat."""
+
+    @abstractmethod
+    def list_models(self) -> list[str]:
+        """Return names of models available on this provider."""
+
+    @abstractmethod
+    async def alist_models(self) -> list[str]:
+        """Async variant of list_models."""
