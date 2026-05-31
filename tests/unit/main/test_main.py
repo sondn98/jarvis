@@ -2,7 +2,6 @@ import importlib
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -87,9 +86,9 @@ class TestMainIntegration:
         mock_service = MagicMock()
         mock_service.alist_models = AsyncMock(return_value=["llama3.2"])
         mock_service.achat = AsyncMock(
-            return_value=__import__("llm.models", fromlist=["ChatResponse"]).ChatResponse(
-                content="ok", finish_reason="stop"
-            )
+            return_value=__import__(
+                "llm.models", fromlist=["ChatResponse"]
+            ).ChatResponse(content="ok", finish_reason="stop")
         )
         app = create_app(config=APIServerConfig(), llm_service=mock_service)
         return TestClient(app)
@@ -115,7 +114,7 @@ class TestMainIntegration:
 
     def test_openai_compatible_endpoints_present(self):
         app = create_app(config=APIServerConfig(), llm_service=MagicMock())
-        client = TestClient(app)
+        TestClient(app)
         paths = [r.path for r in app.routes]
         assert "/v1/models" in paths
         assert "/v1/chat/completions" in paths

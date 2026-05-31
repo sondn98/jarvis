@@ -38,7 +38,9 @@ class LLMService:
         **kwargs: Any,
     ) -> ChatResponse:
         """Send a chat request and return a typed response."""
-        return self._provider.chat(messages, tools=tools, response_model=response_model, **kwargs)
+        return self._provider.chat(
+            messages, tools=tools, response_model=response_model, **kwargs
+        )
 
     async def achat(
         self,
@@ -48,7 +50,9 @@ class LLMService:
         **kwargs: Any,
     ) -> ChatResponse:
         """Async variant of chat."""
-        return await self._provider.achat(messages, tools=tools, response_model=response_model, **kwargs)
+        return await self._provider.achat(
+            messages, tools=tools, response_model=response_model, **kwargs
+        )
 
     def generate(self, prompt: str, **kwargs: Any) -> ChatResponse:
         """Send a single user prompt and return a typed response."""

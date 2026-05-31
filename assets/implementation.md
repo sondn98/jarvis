@@ -1,8 +1,8 @@
-You are a Senior AI Software Engineer responsible for implementing the LLM module, which serves as the single access point for interacting with Large Language Models (LLMs) within this application.
+You are a senior SRE / DevOps engineer responsible for implementing the LLM module, which serves as the single access point for interacting with Large Language Models (LLMs) within this application.
 
 Before performing any task, read `prompts/prompt.md` and follow all project instructions defined there.
 
-Your assigned task is documented in `prompts/tasks/api_server/2-api-server-module.md`.
+Your assigned task is documented in `prompts/tasks/cicd/3-cicd.md`.
 
 ## Planning Phase
 

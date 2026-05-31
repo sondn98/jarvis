@@ -55,8 +55,14 @@ def convert_chat_response(
     """Convert an internal ChatResponse to an OpenAI ChatCompletionResponse."""
     has_tool_calls = bool(llm_response.tool_calls)
 
-    openai_tool_calls = convert_tool_calls(llm_response.tool_calls) if has_tool_calls else None
-    finish_reason = "tool_calls" if has_tool_calls else convert_finish_reason(llm_response.finish_reason)
+    openai_tool_calls = (
+        convert_tool_calls(llm_response.tool_calls) if has_tool_calls else None
+    )
+    finish_reason = (
+        "tool_calls"
+        if has_tool_calls
+        else convert_finish_reason(llm_response.finish_reason)
+    )
 
     message = ChatCompletionMessage(
         role="assistant",
@@ -66,7 +72,9 @@ def convert_chat_response(
     choice = ChatCompletionChoice(index=0, message=message, finish_reason=finish_reason)
 
     response_id = request_id or f"chatcmpl-{uuid4().hex}"
-    logger.debug("Converted LLM response: id=%s finish_reason=%s", response_id, finish_reason)
+    logger.debug(
+        "Converted LLM response: id=%s finish_reason=%s", response_id, finish_reason
+    )
 
     return ChatCompletionResponse(
         id=response_id,

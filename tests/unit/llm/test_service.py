@@ -4,7 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 from llm.config import LLMConfig
-from llm.models import ChatResponse, Message, MessageRole, ToolCall, ToolDefinition
+from llm.models import ChatResponse, Message, MessageRole, ToolCall
 from llm.service import LLMService
 
 
@@ -30,19 +30,25 @@ class TestChat:
 
         result = service.chat([user_message])
 
-        mock_provider.chat.assert_called_once_with([user_message], tools=None, response_model=None)
+        mock_provider.chat.assert_called_once_with(
+            [user_message], tools=None, response_model=None
+        )
         assert result.content == "Hi!"
 
     def test_chat_with_tools(self, service, mock_provider, user_message, search_tool):
         expected = ChatResponse(
-            tool_calls=[ToolCall(id="1", name="search_docs", arguments={"query": "test"})],
+            tool_calls=[
+                ToolCall(id="1", name="search_docs", arguments={"query": "test"})
+            ],
             finish_reason="tool_calls",
         )
         mock_provider.chat.return_value = expected
 
         result = service.chat([user_message], tools=[search_tool])
 
-        mock_provider.chat.assert_called_once_with([user_message], tools=[search_tool], response_model=None)
+        mock_provider.chat.assert_called_once_with(
+            [user_message], tools=[search_tool], response_model=None
+        )
         assert len(result.tool_calls) == 1
 
     def test_chat_with_response_model(self, service, mock_provider, user_message):
@@ -54,7 +60,9 @@ class TestChat:
 
         result = service.chat([user_message], response_model=MyModel)
 
-        mock_provider.chat.assert_called_once_with([user_message], tools=None, response_model=MyModel)
+        mock_provider.chat.assert_called_once_with(
+            [user_message], tools=None, response_model=MyModel
+        )
         assert result.content == '{"answer": "42"}'
 
 
@@ -66,7 +74,9 @@ class TestAchat:
 
         result = await service.achat([user_message])
 
-        mock_provider.achat.assert_called_once_with([user_message], tools=None, response_model=None)
+        mock_provider.achat.assert_called_once_with(
+            [user_message], tools=None, response_model=None
+        )
         assert result.content == "Async hello!"
 
 

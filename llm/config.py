@@ -7,7 +7,9 @@ from llm.exceptions import ConfigurationError
 class LLMConfig(BaseSettings):
     """LLM module configuration loaded from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     ollama_base_url: str = Field(default="http://localhost:11434")
     default_model: str

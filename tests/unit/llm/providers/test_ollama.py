@@ -5,8 +5,13 @@ from pydantic import BaseModel
 
 from llm.config import LLMConfig
 from llm.exceptions import ProviderError, StructuredOutputError, ToolCallParsingError
-from llm.models import Message, MessageRole, ToolDefinition
-from llm.providers.ollama import OllamaProvider, _build_chat_response, _to_ollama_message, _to_ollama_tool
+from llm.models import Message, MessageRole
+from llm.providers.ollama import (
+    OllamaProvider,
+    _build_chat_response,
+    _to_ollama_message,
+    _to_ollama_tool,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +83,9 @@ class TestBuildChatResponse:
 
     def test_tool_call_response(self):
         tc = _make_ollama_tool_call("search_docs", {"query": "test"})
-        raw = _make_ollama_response(content="", tool_calls=[tc], done_reason="tool_calls")
+        raw = _make_ollama_response(
+            content="", tool_calls=[tc], done_reason="tool_calls"
+        )
         resp = _build_chat_response(raw, response_model=None)
         assert len(resp.tool_calls) == 1
         assert resp.tool_calls[0].name == "search_docs"
@@ -128,7 +135,10 @@ def config():
 
 @pytest.fixture
 def provider(config):
-    with patch("llm.providers.ollama.ollama_sdk.Client"), patch("llm.providers.ollama.ollama_sdk.AsyncClient"):
+    with (
+        patch("llm.providers.ollama.ollama_sdk.Client"),
+        patch("llm.providers.ollama.ollama_sdk.AsyncClient"),
+    ):
         return OllamaProvider(config)
 
 
@@ -144,7 +154,9 @@ class TestOllamaProviderChat:
 
     def test_chat_with_tools(self, provider, user_message, search_tool):
         tc = _make_ollama_tool_call("search_docs", {"query": "hello"})
-        raw = _make_ollama_response(content="", tool_calls=[tc], done_reason="tool_calls")
+        raw = _make_ollama_response(
+            content="", tool_calls=[tc], done_reason="tool_calls"
+        )
         provider._client.chat.return_value = raw
 
         resp = provider.chat([user_message], tools=[search_tool])
@@ -187,6 +199,8 @@ class TestOllamaProviderAchat:
     async def test_async_provider_error_raises(self, provider, user_message):
         import ollama as sdk
 
-        provider._async_client.chat = AsyncMock(side_effect=sdk.ResponseError("unavailable"))
+        provider._async_client.chat = AsyncMock(
+            side_effect=sdk.ResponseError("unavailable")
+        )
         with pytest.raises(ProviderError):
             await provider.achat([user_message])

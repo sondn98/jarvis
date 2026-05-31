@@ -7,7 +7,12 @@ import ollama as ollama_sdk
 from pydantic import BaseModel, ValidationError
 
 from llm.config import LLMConfig
-from llm.exceptions import ProviderError, StructuredOutputError, TimeoutError, ToolCallParsingError
+from llm.exceptions import (
+    ProviderError,
+    StructuredOutputError,
+    TimeoutError,
+    ToolCallParsingError,
+)
 from llm.models import ChatResponse, Message, ToolCall, ToolDefinition
 from llm.providers.base import BaseProvider
 
@@ -46,7 +51,9 @@ def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCall]:
     return result
 
 
-def _build_chat_response(raw: ollama_sdk.ChatResponse, response_model: type[BaseModel] | None) -> ChatResponse:
+def _build_chat_response(
+    raw: ollama_sdk.ChatResponse, response_model: type[BaseModel] | None
+) -> ChatResponse:
     message = raw.message
     tool_calls: list[ToolCall] = []
 
@@ -100,7 +107,9 @@ class OllamaProvider(BaseProvider):
             "num_predict": kwargs.get("max_tokens", self._config.default_max_tokens),
         }
 
-    def _build_format(self, response_model: type[BaseModel] | None) -> dict[str, Any] | None:
+    def _build_format(
+        self, response_model: type[BaseModel] | None
+    ) -> dict[str, Any] | None:
         if response_model is None:
             return None
         return response_model.model_json_schema()
@@ -174,7 +183,9 @@ class OllamaProvider(BaseProvider):
             raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
 
         response = _build_chat_response(raw, response_model)
-        logger.info("LLM async request complete: finish_reason=%s", response.finish_reason)
+        logger.info(
+            "LLM async request complete: finish_reason=%s", response.finish_reason
+        )
         return response
 
     def list_models(self) -> list[str]:
