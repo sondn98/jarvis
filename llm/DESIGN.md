@@ -6,27 +6,27 @@ The `llm` module is the single, centralized access point for all LLM interaction
 
 **What is implemented:**
 
-- `LLMService` — the public entry point with four methods: `chat`, `achat`, `generate`, `agenerate`
+- `LLMService` — the public entry point with five methods: `chat`, `achat`, `generate`, `agenerate`, `stream_chat`
 - `LLMConfig` — Pydantic-settings-based configuration loaded from environment variables with fail-fast validation
-- `Message`, `MessageRole`, `ToolDefinition`, `ToolCall`, `ChatResponse` — provider-agnostic Pydantic models that form the canonical message format for the entire application
+- `Message`, `MessageRole`, `ToolDefinition`, `ToolCall`, `ChatResponse`, `LLMStreamChunk` — provider-agnostic Pydantic models that form the canonical message format for the entire application
 - `BaseProvider` — a minimal abstract interface isolating the rest of the application from provider-specific code
-- `OllamaProvider` — the only concrete provider, backed by the official Ollama Python SDK
-- Custom exception hierarchy (`LLMError`, `ConfigurationError`, `ProviderError`, `TimeoutError`, `StructuredOutputError`, `ToolCallParsingError`)
+- `OllamaProvider` — the only concrete provider, backed by the official Ollama Python SDK; supports both batch and streaming modes
+- Custom exception hierarchy (`LLMError`, `ConfigurationError`, `ProviderError`, `TimeoutError`, `StructuredOutputError`, `ToolCallParsingError`, `StreamingNotSupportedError`)
 - Tool calling: accepts `ToolDefinition` objects, translates them to Ollama format, parses responses into `ToolCall` objects
 - Structured output: accepts a Pydantic `response_model`, passes its JSON schema as the Ollama `format` parameter, validates and returns the result
-- 48 unit tests covering config, models, service, and provider layers; all mocked, fast, and deterministic
+- Streaming: async generator API (`stream_chat`) that yields `LLMStreamChunk` objects incrementally without buffering the full response
+- 51 unit tests covering config, models, service, and provider layers; all mocked, fast, and deterministic
 
 **Known limitations:**
 
 - Only the Ollama provider is implemented
-- No streaming support
 - No retry logic — all retry decisions are delegated to callers
 - No connection pooling configuration beyond the SDK defaults
+- Streaming with structured output is not supported (incompatible with incremental delivery)
 
 **Future extension points:**
 
 - New providers: implement `BaseProvider` and inject via `LLMService(config, provider=...)`
-- Streaming: add `stream_chat` / `astream_chat` methods to `BaseProvider`
 - Retry: wrap `LLMService` at the call site or add a retry-capable decorator provider
 
 ---
@@ -58,11 +58,11 @@ The `llm` module explicitly does not handle:
 - RAG retrieval
 - Agent orchestration or workflow management
 - Retry logic
-- Streaming responses
 - Embedding generation
 - Token/usage accounting
 - Multi-provider routing or fallback
 - LangGraph-specific code (though the API is designed to work naturally within LangGraph nodes)
+- Streaming with structured output (the two features are incompatible)
 
 ---
 
@@ -72,19 +72,20 @@ The `llm` module explicitly does not handle:
 ┌─────────────────────────────────────────────────────┐
 │                    Caller (agent, node, etc.)        │
 └──────────────────────────┬──────────────────────────┘
-                           │ chat(messages, tools?, response_model?)
+                           │ chat / stream_chat
                            ▼
 ┌─────────────────────────────────────────────────────┐
 │                     LLMService                      │
-│  chat / achat / generate / agenerate                │
+│  chat / achat / generate / agenerate / stream_chat  │
 │  - delegates entirely to BaseProvider               │
 └──────────────────────────┬──────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────┐
 │                   BaseProvider (ABC)                │
-│  chat(messages, tools, response_model) → ChatResponse│
-│  achat(...)                                         │
+│  chat(...)  → ChatResponse                          │
+│  achat(...) → ChatResponse                          │
+│  astream_chat(...) → AsyncIterator[LLMStreamChunk]  │
 └──────────────────────────┬──────────────────────────┘
                            │
                            ▼
@@ -95,6 +96,7 @@ The `llm` module explicitly does not handle:
 │  - calls ollama.Client / AsyncClient                │
 │  - parses ToolCall objects from response            │
 │  - validates structured output via Pydantic         │
+│  - streams via AsyncClient.chat(stream=True)        │
 │  - maps SDK exceptions → internal exceptions        │
 └─────────────────────────────────────────────────────┘
 ```
@@ -155,6 +157,21 @@ Caller
   → Caller parses: MyModel.model_validate_json(response.content)
 ```
 
+### Data flow — streaming
+
+```
+Caller
+  → messages
+  → LLMService.stream_chat()          ← async generator
+  → OllamaProvider.astream_chat()     ← async generator
+      → AsyncClient.chat(stream=True)
+      → async for sdk_chunk in response:
+          yield LLMStreamChunk(content, done, provider, model, finish_reason)
+  → Caller receives chunks immediately as they arrive
+```
+
+The `LLMStreamChunk` model is the only type that crosses the provider boundary during streaming. No Ollama SDK types are exposed to callers.
+
 ---
 
 ## Design Decisions
@@ -213,7 +230,27 @@ Caller
 
 ---
 
-### 6. No retries
+### 6. Streaming: async-only, no sync variant
+
+**Chosen:** Only `astream_chat` is added to `BaseProvider`. `LLMService` exposes it as `stream_chat` (no `a` prefix at the service level since there is no sync sibling).
+
+**Why:** Streaming is inherently useful only in async contexts (FastAPI routes, SSE endpoints). A sync streaming generator would never be called in practice and would add dead surface area. The `stream_chat` name on the service matches the task's usage example.
+
+**Tradeoff:** Breaking the `chat`/`achat` symmetry at the service level. Accepted because the `a` prefix at the service is cosmetic — the service has no blocking work of its own, it always delegates.
+
+---
+
+### 7. Streaming cancellation relies on SDK cleanup
+
+**Chosen:** No explicit resource cleanup code in `astream_chat`. When the caller breaks out of `async for`, Python calls `aclose()` on the generator chain, which in turn closes the Ollama `AsyncClient` response iterator. The Ollama SDK (backed by `httpx`) cancels the underlying HTTP request on stream close.
+
+**Why:** Adding manual cleanup would duplicate what the SDK already does correctly.
+
+**Tradeoff:** If the Ollama SDK changes its cleanup behavior, this assumption breaks. Documented here as the load-bearing assumption.
+
+---
+
+### 8. No retries
 
 **Chosen:** On any failure, raise the appropriate exception immediately.
 
@@ -238,9 +275,30 @@ class BaseProvider(ABC):
     ) -> ChatResponse: ...
 
     async def achat(...) -> ChatResponse: ...
+
+    async def astream_chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMStreamChunk]: ...
 ```
 
-Any new provider must implement both methods and must not raise exceptions outside the `LLMError` hierarchy.
+`chat` and `achat` are abstract and must be implemented. `astream_chat` has a default implementation that raises `StreamingNotSupportedError`; providers that support streaming must override it. All methods must not raise exceptions outside the `LLMError` hierarchy.
+
+### `LLMStreamChunk`
+
+The stable chunk type yielded by all streaming APIs.
+
+```python
+class LLMStreamChunk(BaseModel):
+    content: str          # incremental text; empty string on the final done=True chunk
+    done: bool            # True on the last chunk
+    provider: str | None  # e.g. "ollama"
+    model: str | None     # model name reported by the provider
+    finish_reason: str | None  # set on the final chunk (e.g. "stop", "length")
+    raw: dict | None      # reserved for provider metadata; currently always None
+```
 
 ### `ChatResponse`
 
@@ -266,19 +324,12 @@ The canonical message format. All callers construct messages using this model; p
 ### Adding a new provider (e.g. OpenAI, Anthropic)
 
 1. Create `llm/providers/<name>.py`
-2. Implement `BaseProvider.chat` and `BaseProvider.achat`
-3. Map provider-specific errors to the `LLMError` hierarchy
-4. Inject via `LLMService(config, provider=MyProvider(config))`
+2. Implement `BaseProvider.chat` and `BaseProvider.achat` (required)
+3. Optionally override `BaseProvider.astream_chat` to support streaming; the default raises `StreamingNotSupportedError`
+4. Map provider-specific errors to the `LLMError` hierarchy
+5. Inject via `LLMService(config, provider=MyProvider(config))`
 
-No changes to `LLMService`, `models.py`, or `exceptions.py` are required.
-
-### Adding streaming
-
-1. Add `stream_chat` / `astream_chat` to `BaseProvider` returning an `AsyncIterator[ChatResponse]`
-2. Implement in `OllamaProvider` using `ollama.Client.chat(stream=True)`
-3. Add corresponding methods to `LLMService`
-
-Existing non-streaming callers are unaffected.
+No changes to `LLMService`, `models.py`, or `exceptions.py` are required for a basic integration.
 
 ### Adding a retry wrapper
 
@@ -299,9 +350,9 @@ llm = LLMService(config, provider=RetryingProvider(OllamaProvider(config), max_r
 - [x] `OllamaProvider` — sync and async chat
 - [x] Tool calling support
 - [x] Structured output support
-- [x] `LLMService` with `chat`, `achat`, `generate`, `agenerate`
-- [x] Unit tests (48 tests, all passing)
-- [ ] Streaming support
+- [x] `LLMService` with `chat`, `achat`, `generate`, `agenerate`, `stream_chat`
+- [x] Streaming support (`astream_chat` on `OllamaProvider`, `stream_chat` on `LLMService`)
+- [x] Unit tests (136 tests, all passing)
 - [ ] Retry / backoff support
 - [ ] Additional providers (OpenAI, Anthropic, etc.)
 - [ ] Embedding generation
@@ -323,7 +374,7 @@ All unit tests mock the Ollama SDK (`ollama.Client`, `ollama.AsyncClient`). Test
 | `test_config.py` | Valid config, missing required fields, invalid values |
 | `test_models.py` | Model construction, field validation, default values |
 | `test_service.py` | Delegation to provider, `generate` → `chat` wrapping, async paths |
-| `providers/test_ollama.py` | Message/tool translation, response parsing, error mapping, tool calls, structured output, async |
+| `providers/test_ollama.py` | Message/tool translation, response parsing, error mapping, tool calls, structured output, async, streaming |
 
 ### Integration tests
 
@@ -345,19 +396,52 @@ Integration tests should use a real Ollama instance and cover end-to-end chat, t
 ## Known Limitations
 
 1. **Single provider**: only Ollama is supported. Multi-provider routing or fallback is not implemented.
-2. **No streaming**: `stream=False` is always passed to the Ollama SDK. Streaming is a future extension point.
-3. **No retries**: the module raises immediately on failure. Callers own retry logic.
-4. **Structured output consistency**: Ollama's JSON-constrained generation is best-effort. The module raises `StructuredOutputError` on validation failure rather than attempting repair or retry.
-5. **`ConfigurationError` vs `ValidationError`**: missing required env vars raise `ValidationError` (from pydantic); invalid values raise `ConfigurationError`. Callers should catch `(ValidationError, ConfigurationError)` for complete config error handling.
-6. **Tool call IDs**: Ollama does not return tool call IDs, so `ToolCall.id` is assigned a generated UUID. Callers must not depend on this ID being stable across equivalent requests.
+2. **No retries**: the module raises immediately on failure. Callers own retry logic.
+3. **Structured output consistency**: Ollama's JSON-constrained generation is best-effort. The module raises `StructuredOutputError` on validation failure rather than attempting repair or retry.
+4. **`ConfigurationError` vs `ValidationError`**: missing required env vars raise `ValidationError` (from pydantic); invalid values raise `ConfigurationError`. Callers should catch `(ValidationError, ConfigurationError)` for complete config error handling.
+5. **Tool call IDs**: Ollama does not return tool call IDs, so `ToolCall.id` is assigned a generated UUID. Callers must not depend on this ID being stable across equivalent requests.
+6. **Streaming error visibility**: if an error occurs after the first streaming chunk is yielded, callers receive a truncated stream rather than a structured error object. This is consistent with how production LLM APIs behave and is inherent to the streaming model.
+7. **Streaming cancellation**: relies on Python async generator `aclose()` and the Ollama SDK (httpx) cleaning up the HTTP connection. No additional resource management is implemented.
 
 ---
 
 ## Future Roadmap
 
 1. **Integration tests** against a real Ollama instance
-2. **Streaming API** (`stream_chat` / `astream_chat`)
-3. **Retry wrapper provider** for configurable backoff
-4. **Additional providers** (OpenAI, Anthropic) via `BaseProvider`
-5. **Token usage tracking** — surface `prompt_eval_count` / `eval_count` from Ollama in `ChatResponse`
-6. **Timeout via httpx/asyncio** — replace SDK-level timeout with explicit `asyncio.wait_for` for more reliable async cancellation
+2. **Retry wrapper provider** for configurable backoff
+3. **Additional providers** (OpenAI, Anthropic) via `BaseProvider`
+4. **Token usage tracking** — surface `prompt_eval_count` / `eval_count` from Ollama in `ChatResponse`
+5. **Timeout via httpx/asyncio** — replace SDK-level timeout with explicit `asyncio.wait_for` for more reliable async cancellation
+
+---
+
+## Open WebUI / OpenAI-Compatible Integration Strategy
+
+The streaming architecture is designed so that adding an Open WebUI-compatible endpoint requires only API-layer work — no changes to the `llm` module.
+
+**Target integration:**
+
+```
+Open WebUI
+    ↓  (OpenAI-compatible streaming API)
+api_server /v1/chat/completions?stream=true
+    ↓
+LLMService.stream_chat(messages)
+    ↓
+OllamaProvider.astream_chat(messages)
+    ↓
+Ollama
+```
+
+**What is already in place:**
+
+- `LLMStreamChunk` is provider-agnostic; no Ollama types reach the API layer
+- The `/v1/chat/completions` endpoint accepts `"stream": true` and returns SSE formatted as `data: {json}\n\n` / `data: [DONE]\n\n`
+- The `ChatCompletionChunk` schema matches the OpenAI `chat.completion.chunk` object spec
+- Open WebUI expects exactly this format
+
+**What remains for full Open WebUI compatibility:**
+
+- Verify Open WebUI connectivity against the running API server (config: point Open WebUI at the Jarvis base URL)
+- Add `stream_options` pass-through if usage tokens are needed
+- Add `/v1/models` validation (already implemented in `routes/models.py`)

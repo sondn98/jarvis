@@ -1,9 +1,16 @@
+from collections.abc import AsyncIterator
 from typing import Any
 
 from pydantic import BaseModel
 
 from llm.config import LLMConfig
-from llm.models import ChatResponse, Message, MessageRole, ToolDefinition
+from llm.models import (
+    ChatResponse,
+    LLMStreamChunk,
+    Message,
+    MessageRole,
+    ToolDefinition,
+)
 from llm.providers.base import BaseProvider
 from llm.providers.ollama import OllamaProvider
 
@@ -63,6 +70,16 @@ class LLMService:
         """Async variant of generate."""
         messages = [Message(role=MessageRole.USER, content=prompt)]
         return await self.achat(messages, **kwargs)
+
+    async def stream_chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        """Stream a chat response, yielding chunks as they arrive from the provider."""
+        async for chunk in self._provider.astream_chat(messages, tools=tools, **kwargs):
+            yield chunk
 
     def list_models(self) -> list[str]:
         """Return names of models available from the configured provider."""

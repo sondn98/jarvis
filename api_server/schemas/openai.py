@@ -78,6 +78,25 @@ class ChatCompletionResponse(BaseModel):
     choices: list[ChatCompletionChoice]
 
 
+class ChatCompletionChunkDelta(BaseModel):
+    role: str | None = None
+    content: str | None = None
+
+
+class ChatCompletionChunkChoice(BaseModel):
+    index: int
+    delta: ChatCompletionChunkDelta
+    finish_reason: str | None = None
+
+
+class ChatCompletionChunk(BaseModel):
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: list[ChatCompletionChunkChoice]
+
+
 class ModelObject(BaseModel):
     id: str
     object: str = "model"

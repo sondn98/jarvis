@@ -8,7 +8,7 @@
 
 - `GET /health` — returns `{"status": "ok"}`
 - `GET /v1/models` — calls `LLMService.alist_models()` and returns an OpenAI `ModelListResponse`
-- `POST /v1/chat/completions` — accepts OpenAI chat completion requests, passes them through adapters into `LLMService.achat()`, and converts the response back into OpenAI format
+- `POST /v1/chat/completions` — accepts OpenAI chat completion requests; routes to `LLMService.achat()` for non-streaming requests and `LLMService.stream_chat()` for streaming requests (`"stream": true`); converts responses into OpenAI format
 - Optional Bearer token authentication enforced by a FastAPI dependency
 - Consistent OpenAI-style JSON error envelope for all error paths
 - Explicit adapter layer: `openai_to_llm` and `llm_to_openai` translate between OpenAI schemas and internal `llm` models
@@ -25,7 +25,7 @@
 | OpenAI schemas | `schemas/openai.py` | Request and response Pydantic models |
 | Error schema | `schemas/errors.py` | `OpenAIErrorResponse` envelope |
 | `openai_to_llm` | `adapters/openai_to_llm.py` | Converts OpenAI requests → internal models |
-| `llm_to_openai` | `adapters/llm_to_openai.py` | Converts internal responses → OpenAI models |
+| `llm_to_openai` | `adapters/llm_to_openai.py` | Converts internal responses → OpenAI models (batch and streaming) |
 | `health` router | `routes/health.py` | `GET /health` |
 | `models` router | `routes/models.py` | `GET /v1/models` |
 | `chat` router | `routes/chat.py` | `POST /v1/chat/completions` |
@@ -33,7 +33,6 @@
 
 **Known limitations:**
 
-- Streaming is not supported. `stream=true` returns `400 unsupported_feature`.
 - `response_format` types other than `"text"` are not supported. `json_object` and `json_schema` return `400 unsupported_feature`.
 - Multi-turn conversations with assistant messages containing `tool_calls` in the history lose the tool-call context when converted to `llm.Message` (which only has `role` and `content`).
 
@@ -55,7 +54,6 @@ Open WebUI expects an OpenAI-compatible API. The `llm` module uses an internal m
 
 ## Non-Goals
 
-- Streaming
 - RAG, memory, conversation persistence
 - Tool execution
 - Embeddings
@@ -82,18 +80,34 @@ llm
 Ollama
 ```
 
-Request flow for `POST /v1/chat/completions`:
+Request flow for `POST /v1/chat/completions` (non-streaming):
 
 ```
 1. FastAPI validates ChatCompletionRequest
 2. verify_api_key dependency runs (if enabled)
-3. chat route: rejects stream=True / unsupported response_format
+3. chat route: rejects unsupported response_format
 4. openai_to_llm.convert_messages() → list[Message]
 5. openai_to_llm.convert_tools() → list[ToolDefinition]
 6. openai_to_llm.build_llm_kwargs() → dict (model, temperature, etc.)
 7. LLMService.achat(messages, tools=tools, **kwargs)
 8. llm_to_openai.convert_chat_response() → ChatCompletionResponse
 9. FastAPI serialises response
+```
+
+Request flow for `POST /v1/chat/completions` (streaming, `"stream": true`):
+
+```
+1. FastAPI validates ChatCompletionRequest
+2. verify_api_key dependency runs (if enabled)
+3. chat route: detects stream=True, generates request_id
+4. Returns StreamingResponse(media_type="text/event-stream")
+5. _sse_generator async generator runs:
+   a. openai_to_llm.convert_messages() + convert_tools()
+   b. LLMService.stream_chat(messages, tools=tools, **kwargs)
+   c. For each LLMStreamChunk: llm_to_openai.convert_stream_chunk() → ChatCompletionChunk
+   d. Yields "data: {json}\n\n" per chunk
+   e. Yields "data: [DONE]\n\n" at end
+6. Client receives incremental SSE events
 ```
 
 ---
@@ -116,9 +130,11 @@ A catch-all handler ensures no raw stack traces reach clients. In Starlette's te
 
 The `llm` module's structured output requires a Python `type[BaseModel]`. There is no practical way to build a Pydantic class from an incoming JSON schema at request time. `json_object` and `json_schema` are rejected explicitly rather than silently ignored.
 
-### Streaming rejected explicitly
+### Streaming via SSE, not buffered
 
-Same pattern as `response_format`. The design leaves a clear extension point: implement a streaming path in `routes/chat.py` and a streaming adapter, then remove the rejection guard.
+When `stream=true`, the route returns `StreamingResponse(media_type="text/event-stream")` backed by an async generator that iterates `LLMService.stream_chat()`. Each `LLMStreamChunk` is converted to a `ChatCompletionChunk` (OpenAI `chat.completion.chunk` format) and forwarded immediately as `data: {json}\n\n`. The stream terminates with `data: [DONE]\n\n`.
+
+This means HTTP 200 is committed before any chunks arrive. If the provider fails mid-stream, the client receives a truncated SSE stream rather than an HTTP error code — consistent with how production LLM APIs behave.
 
 ---
 
@@ -130,7 +146,7 @@ Same pattern as `response_format`. The design leaves a clear extension point: im
 |---|---|---|---|
 | GET | `/health` | No | Always returns `{"status": "ok"}` |
 | GET | `/v1/models` | Optional | Returns `ModelListResponse` |
-| POST | `/v1/chat/completions` | Optional | Returns `ChatCompletionResponse` |
+| POST | `/v1/chat/completions` | Optional | Returns `ChatCompletionResponse` (non-streaming) or SSE stream of `ChatCompletionChunk` (streaming) |
 
 ### Error envelope
 
@@ -160,7 +176,6 @@ All errors use:
 
 ## Extension Points
 
-- **Streaming**: add streaming adapter and async generator path in `routes/chat.py`
 - **New endpoints**: add route file in `routes/`, register in `app.py`
 - **New error types**: add handler in `errors.py`
 - **Middleware (CORS, rate-limiting)**: add in `create_app()` in `app.py`
@@ -179,7 +194,7 @@ All errors use:
 - [x] Adapter layer
 - [x] Application factory
 - [x] `main.py` entrypoint
-- [ ] Streaming
+- [x] Streaming (`stream=true` → SSE via `LLMService.stream_chat`)
 - [ ] `response_format: json_object` / `json_schema`
 - [ ] Multi-turn tool-call history (lossless)
 
@@ -198,8 +213,7 @@ All tests are in `tests/unit/api_server/` and `tests/unit/main/`.
 
 ## Known Limitations
 
-1. Streaming not implemented
-2. `response_format` only supports `"text"`
+1. `response_format` only supports `"text"`
 3. Assistant messages with `tool_calls` in conversation history lose call context (llm.Message has no `tool_calls` field)
 4. `TestClient` re-raises generic `RuntimeError` in `raise_server_exceptions=True` mode — tests for the catch-all handler use `raise_server_exceptions=False`
 
@@ -207,7 +221,6 @@ All tests are in `tests/unit/api_server/` and `tests/unit/main/`.
 
 ## Future Roadmap
 
-- Add streaming once `llm` module supports it
 - Support `response_format: json_object` (after `llm` module adds schema-less JSON mode)
 - Extend `llm.Message` to carry `tool_calls` for lossless multi-turn history
 - Add CORS middleware for browser-based clients
