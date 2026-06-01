@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 from api_server.app import create_app
 from api_server.config import APIServerConfig
 from llm.exceptions import LLMError, ProviderError
-from llm.models import ChatResponse, ToolCall
+from llm.models import ChatResponse, LLMStreamChunk, ToolCall
+
+
+async def _async_iter(items):
+    for item in items:
+        yield item
 
 
 def _make_client(
@@ -13,6 +18,7 @@ def _make_client(
     llm_side_effect=None,
     enable_auth: bool = False,
     api_key: str | None = None,
+    stream_chunks: list[LLMStreamChunk] | None = None,
 ):
     config = APIServerConfig(enable_api_key_auth=enable_auth, api_key=api_key)
     mock_service = MagicMock()
@@ -21,6 +27,10 @@ def _make_client(
     else:
         response = llm_response or ChatResponse(content="Hello", finish_reason="stop")
         mock_service.achat = AsyncMock(return_value=response)
+    chunks = stream_chunks or [
+        LLMStreamChunk(content="Hi", done=True, finish_reason="stop")
+    ]
+    mock_service.stream_chat = MagicMock(return_value=_async_iter(chunks))
     app = create_app(config=config, llm_service=mock_service)
     return TestClient(app)
 
@@ -94,13 +104,24 @@ class TestChatCompletions:
         assert call_kwargs.get("max_tokens") == 100
 
 
-class TestStreamRejection:
-    def test_stream_true_returns_400(self):
+class TestStreaming:
+    def test_stream_true_returns_sse_200(self):
         client = _make_client()
         resp = client.post("/v1/chat/completions", json=_chat_payload(stream=True))
-        assert resp.status_code == 400
-        assert resp.json()["error"]["type"] == "unsupported_feature"
-        assert "Streaming" in resp.json()["error"]["message"]
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+
+    def test_stream_response_contains_data_lines(self):
+        chunks = [
+            LLMStreamChunk(content="Hello", done=False),
+            LLMStreamChunk(content=" world", done=True, finish_reason="stop"),
+        ]
+        client = _make_client(stream_chunks=chunks)
+        resp = client.post("/v1/chat/completions", json=_chat_payload(stream=True))
+        assert resp.status_code == 200
+        body = resp.text
+        assert "data: " in body
+        assert "data: [DONE]" in body
 
     def test_stream_false_is_accepted(self):
         client = _make_client()

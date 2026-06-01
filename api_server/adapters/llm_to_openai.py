@@ -3,9 +3,12 @@ import logging
 import time
 from uuid import uuid4
 
-from llm.models import ChatResponse, ToolCall
+from llm.models import ChatResponse, LLMStreamChunk, ToolCall
 from api_server.schemas.openai import (
     ChatCompletionChoice,
+    ChatCompletionChunk,
+    ChatCompletionChunkChoice,
+    ChatCompletionChunkDelta,
     ChatCompletionMessage,
     ChatCompletionResponse,
     ChatToolCall,
@@ -82,4 +85,33 @@ def convert_chat_response(
         created=int(time.time()),
         model=model,
         choices=[choice],
+    )
+
+
+def convert_stream_chunk(
+    chunk: LLMStreamChunk,
+    model: str,
+    request_id: str,
+    *,
+    first: bool,
+) -> ChatCompletionChunk:
+    """Convert an LLMStreamChunk to an OpenAI-compatible chat.completion.chunk."""
+    if first:
+        delta = ChatCompletionChunkDelta(role="assistant", content=chunk.content)
+    else:
+        delta = ChatCompletionChunkDelta(content=chunk.content)
+
+    finish_reason = convert_finish_reason(chunk.finish_reason) if chunk.done else None
+
+    return ChatCompletionChunk(
+        id=request_id,
+        created=int(time.time()),
+        model=model,
+        choices=[
+            ChatCompletionChunkChoice(
+                index=0,
+                delta=delta,
+                finish_reason=finish_reason,
+            )
+        ],
     )

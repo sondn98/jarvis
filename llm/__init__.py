@@ -3,11 +3,19 @@ from llm.exceptions import (
     ConfigurationError,
     LLMError,
     ProviderError,
+    StreamingNotSupportedError,
     StructuredOutputError,
     TimeoutError,
     ToolCallParsingError,
 )
-from llm.models import ChatResponse, Message, MessageRole, ToolCall, ToolDefinition
+from llm.models import (
+    ChatResponse,
+    LLMStreamChunk,
+    Message,
+    MessageRole,
+    ToolCall,
+    ToolDefinition,
+)
 from llm.service import LLMService
 
 __all__ = [
@@ -19,9 +27,11 @@ __all__ = [
     "TimeoutError",
     "StructuredOutputError",
     "ToolCallParsingError",
+    "StreamingNotSupportedError",
     "Message",
     "MessageRole",
     "ToolDefinition",
     "ToolCall",
     "ChatResponse",
+    "LLMStreamChunk",
 ]

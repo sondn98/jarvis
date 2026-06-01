@@ -4,8 +4,13 @@ import pytest
 from pydantic import BaseModel
 
 from llm.config import LLMConfig
-from llm.models import ChatResponse, Message, MessageRole, ToolCall
+from llm.models import ChatResponse, LLMStreamChunk, Message, MessageRole, ToolCall
 from llm.service import LLMService
+
+
+async def _async_iter(items):
+    for item in items:
+        yield item
 
 
 @pytest.fixture
@@ -78,6 +83,23 @@ class TestAchat:
             [user_message], tools=None, response_model=None
         )
         assert result.content == "Async hello!"
+
+
+class TestStreamChat:
+    @pytest.mark.asyncio
+    async def test_stream_chat_delegates_to_provider(
+        self, service, mock_provider, user_message
+    ):
+        chunk = LLMStreamChunk(content="Hi", done=True, finish_reason="stop")
+        mock_provider.astream_chat = MagicMock(return_value=_async_iter([chunk]))
+
+        results = []
+        async for c in service.stream_chat([user_message]):
+            results.append(c)
+
+        mock_provider.astream_chat.assert_called_once_with([user_message], tools=None)
+        assert len(results) == 1
+        assert results[0].content == "Hi"
 
 
 class TestGenerate:

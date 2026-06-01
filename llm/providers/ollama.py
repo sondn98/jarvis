@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
@@ -13,7 +14,7 @@ from llm.exceptions import (
     TimeoutError,
     ToolCallParsingError,
 )
-from llm.models import ChatResponse, Message, ToolCall, ToolDefinition
+from llm.models import ChatResponse, LLMStreamChunk, Message, ToolCall, ToolDefinition
 from llm.providers.base import BaseProvider
 
 logger = logging.getLogger(__name__)
@@ -211,3 +212,44 @@ class OllamaProvider(BaseProvider):
         except Exception as exc:
             logger.error("Unexpected error listing models: %s", exc)
             raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
+
+    async def astream_chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        model = kwargs.get("model", self._config.default_model)
+        ollama_messages = [_to_ollama_message(m) for m in messages]
+        ollama_tools = [_to_ollama_tool(t) for t in tools] if tools else None
+        options = self._build_options(**kwargs)
+
+        logger.info("LLM stream request start: model=%s", model)
+        try:
+            response = await self._async_client.chat(
+                model=model,
+                messages=ollama_messages,
+                tools=ollama_tools,
+                options=options,
+                stream=True,
+            )
+            async for chunk in response:
+                yield LLMStreamChunk(
+                    content=chunk.message.content or "",
+                    done=chunk.done or False,
+                    provider="ollama",
+                    model=chunk.model,
+                    finish_reason=chunk.done_reason if chunk.done else None,
+                    raw=None,
+                )
+        except ollama_sdk.ResponseError as exc:
+            logger.error("Provider stream error: %s", exc)
+            raise ProviderError(str(exc)) from exc
+        except TimeoutError as exc:
+            logger.error("Stream request timed out: %s", exc)
+            raise
+        except Exception as exc:
+            logger.error("Unexpected provider stream error: %s", exc)
+            raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
+        else:
+            logger.info("LLM stream request complete: model=%s", model)

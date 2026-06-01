@@ -14,6 +14,11 @@ from llm.providers.ollama import (
 )
 
 
+async def _async_iter(items):
+    for item in items:
+        yield item
+
+
 # ---------------------------------------------------------------------------
 # Helpers to build fake Ollama SDK objects
 # ---------------------------------------------------------------------------
@@ -204,3 +209,46 @@ class TestOllamaProviderAchat:
         )
         with pytest.raises(ProviderError):
             await provider.achat([user_message])
+
+
+class TestOllamaProviderAstreamChat:
+    def _make_stream_chunk(
+        self, content: str, done: bool, done_reason: str | None = None
+    ):
+        chunk = MagicMock()
+        chunk.message.content = content
+        chunk.done = done
+        chunk.done_reason = done_reason
+        chunk.model = "llama3.2"
+        return chunk
+
+    @pytest.mark.asyncio
+    async def test_astream_chat_yields_chunks(self, provider, user_message):
+        chunks = [
+            self._make_stream_chunk("Hello", done=False),
+            self._make_stream_chunk(" world", done=True, done_reason="stop"),
+        ]
+        provider._async_client.chat = AsyncMock(return_value=_async_iter(chunks))
+
+        results = []
+        async for chunk in provider.astream_chat([user_message]):
+            results.append(chunk)
+
+        assert len(results) == 2
+        assert results[0].content == "Hello"
+        assert results[0].done is False
+        assert results[0].provider == "ollama"
+        assert results[1].content == " world"
+        assert results[1].done is True
+        assert results[1].finish_reason == "stop"
+
+    @pytest.mark.asyncio
+    async def test_astream_chat_provider_error_raises(self, provider, user_message):
+        import ollama as sdk
+
+        provider._async_client.chat = AsyncMock(
+            side_effect=sdk.ResponseError("model not found")
+        )
+        with pytest.raises(ProviderError):
+            async for _ in provider.astream_chat([user_message]):
+                pass

@@ -40,3 +40,14 @@ class ChatResponse(BaseModel):
     content: str | None = None
     tool_calls: list[ToolCall] = Field(default_factory=list)
     finish_reason: str | None = None
+
+
+class LLMStreamChunk(BaseModel):
+    """A single chunk yielded by a streaming LLM response."""
+
+    content: str
+    done: bool
+    provider: str | None = None
+    model: str | None = None
+    finish_reason: str | None = None
+    raw: dict | None = None

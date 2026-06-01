@@ -20,3 +20,7 @@ class StructuredOutputError(LLMError):
 
 class ToolCallParsingError(LLMError):
     """Raised when a tool-call response cannot be parsed."""
+
+
+class StreamingNotSupportedError(LLMError):
+    """Raised when a provider does not implement streaming."""

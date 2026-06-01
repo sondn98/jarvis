@@ -10,7 +10,7 @@ Translate OpenAI-style HTTP requests into internal `llm` module calls, and trans
 
 - `GET /health` — liveness check
 - `GET /v1/models` — lists models available on the configured Ollama instance
-- `POST /v1/chat/completions` — chat completion with tool-calling support
+- `POST /v1/chat/completions` — chat completion with tool-calling and streaming support (`"stream": true` returns SSE)
 - Optional API key authentication
 - Consistent OpenAI-style JSON error responses
 - Structured request/response validation via Pydantic
@@ -56,6 +56,26 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
+### Streaming chat completion
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+Chunks arrive as SSE events:
+
+```
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":...,"model":"llama3.2","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}
+
+data: [DONE]
+```
+
 ### With API key auth enabled
 
 ```bash
@@ -66,7 +86,6 @@ curl -H "Authorization: Bearer mysecret" http://localhost:8000/v1/models
 
 ## Extension Guide
 
-- **Add streaming**: implement a streaming adapter in `adapters/` and add the streaming path in `routes/chat.py`.
 - **Add new endpoints**: create a new file in `routes/`, register it in `app.py`.
 - **Add new error types**: register a new handler in `errors.py`; existing error shape is defined in `schemas/errors.py`.
 - **Add middleware**: add middleware in `app.py` inside `create_app()`.

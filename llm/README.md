@@ -8,9 +8,10 @@ Centralized access point for interacting with Large Language Models (LLMs) withi
 
 - Simple, consistent interface for chat and generation
 - Sync and async APIs (`chat` / `achat`, `generate` / `agenerate`)
+- Streaming API (`stream_chat`) — receive tokens incrementally as they are generated
 - Tool calling — pass tool definitions, receive structured `ToolCall` objects
 - Structured output — pass a Pydantic model, receive a validated instance serialized as JSON
-- Provider-agnostic internal models (`Message`, `ToolDefinition`, `ToolCall`, `ChatResponse`)
+- Provider-agnostic internal models (`Message`, `ToolDefinition`, `ToolCall`, `ChatResponse`, `LLMStreamChunk`)
 - Configuration loaded from environment variables with validation at startup
 - Meaningful custom exceptions; no silent failures
 
@@ -35,6 +36,7 @@ llm = LLMService(config)
 | `achat(...)` | Async variant of `chat` |
 | `generate(prompt, **kwargs)` | Wrap a single string in a user message and call `chat` |
 | `agenerate(prompt, **kwargs)` | Async variant of `generate` |
+| `stream_chat(messages, *, tools, **kwargs)` | Async generator; yields `LLMStreamChunk` incrementally |
 
 All methods accept optional keyword overrides (`model`, `temperature`, `top_p`, `max_tokens`).
 
@@ -47,6 +49,7 @@ All methods accept optional keyword overrides (`model`, `temperature`, `top_p`, 
 | `ToolDefinition` | OpenAI-style tool schema (`name`, `description`, `parameters`) |
 | `ToolCall` | Model-requested tool invocation (`id`, `name`, `arguments`) |
 | `ChatResponse` | Unified response (`content`, `tool_calls`, `finish_reason`) |
+| `LLMStreamChunk` | A single streaming chunk (`content`, `done`, `provider`, `model`, `finish_reason`, `raw`) |
 
 ### Exceptions
 
@@ -58,6 +61,7 @@ All methods accept optional keyword overrides (`model`, `temperature`, `top_p`, 
 | `TimeoutError` | Request exceeds `REQUEST_TIMEOUT` |
 | `StructuredOutputError` | Structured output fails Pydantic validation |
 | `ToolCallParsingError` | Tool-call response cannot be parsed |
+| `StreamingNotSupportedError` | Provider does not implement streaming |
 
 ---
 
@@ -128,6 +132,39 @@ response = await llm.achat(messages, response_model=TaskPlan)
 
 plan = TaskPlan.model_validate_json(response.content)
 print(plan.steps)
+```
+
+### Streaming
+
+```python
+import asyncio
+from llm import LLMConfig, LLMService, Message, MessageRole
+
+async def main():
+    llm = LLMService(LLMConfig())
+    messages = [Message(role=MessageRole.USER, content="Tell me a short story.")]
+
+    async for chunk in llm.stream_chat(messages):
+        print(chunk.content, end="", flush=True)
+        if chunk.done:
+            print()  # newline after final chunk
+
+asyncio.run(main())
+```
+
+Each `LLMStreamChunk` carries:
+- `content` — the incremental text for this chunk (empty on the final `done=True` chunk)
+- `done` — `True` on the last chunk
+- `finish_reason` — set on the final chunk (e.g. `"stop"`, `"length"`)
+- `provider` / `model` — provider metadata
+
+Early exit is safe; the underlying HTTP connection is cleaned up automatically:
+
+```python
+async for chunk in llm.stream_chat(messages):
+    print(chunk.content, end="")
+    if should_stop:
+        break
 ```
 
 ---
