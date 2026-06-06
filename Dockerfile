@@ -22,6 +22,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY main.py ./
 COPY api_server ./api_server
 COPY llm ./llm
+COPY agent_orchestration ./agent_orchestration
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
