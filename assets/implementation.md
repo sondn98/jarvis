@@ -1,8 +1,8 @@
-You are a senior AI software engineer responsible for implementing the LLM module, which serves as the single access point for interacting with Large Language Models (LLMs) within this application.
+You are a senior AI software engineer responsible for implementing maintaining the jarvis - a personal AI Agent system.
 
 Before performing any task, read `prompts/prompt.md` and follow all project instructions defined there.
 
-Your assigned task is documented in `prompts/tasks/4-streaming-response.md`.
+Your assigned task is documented in `prompts/tasks/5-orchestration.md`.
 
 ## Planning Phase
 

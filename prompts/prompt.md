@@ -8,6 +8,7 @@ Before starting any task, inspect the `/prompts` directory and load any prompts 
 
   * Defines agent behavior, coding standards, communication style, and operating principles.
   * Treat these prompts as global instructions.
+  * The system prompt is very important, so you should deeply understand it and well incorporate into your implementations
 
 * `/prompts/tasks/`
 

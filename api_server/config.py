@@ -15,3 +15,4 @@ class APIServerConfig(BaseSettings):
     api_key: str | None = Field(default=None)
     enable_api_key_auth: bool = Field(default=False)
     log_level: str = Field(default="INFO")
+    enable_agent_orchestration: bool = Field(default=False)
