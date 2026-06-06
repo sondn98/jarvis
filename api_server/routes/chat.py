@@ -6,6 +6,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
+from agent_orchestration.adapters.openai_adapter import agent_response_to_openai
+from agent_orchestration.service import AgentService
 from api_server.adapters.llm_to_openai import (
     convert_chat_response,
     convert_stream_chunk,
@@ -16,7 +18,12 @@ from api_server.adapters.openai_to_llm import (
     convert_tools,
 )
 from api_server.config import APIServerConfig
-from api_server.dependencies import get_config, get_llm_service, verify_api_key
+from api_server.dependencies import (
+    get_agent_service,
+    get_config,
+    get_llm_service,
+    verify_api_key,
+)
 from api_server.errors import UnsupportedFeatureError
 from api_server.schemas.openai import ChatCompletionRequest, ChatCompletionResponse
 from llm.service import LLMService
@@ -56,15 +63,29 @@ async def chat_completions(
     body: ChatCompletionRequest,
     llm_service: Annotated[LLMService, Depends(get_llm_service)],
     config: Annotated[APIServerConfig, Depends(get_config)],
+    agent_service: Annotated[AgentService | None, Depends(get_agent_service)],
 ) -> ChatCompletionResponse | StreamingResponse:
     logger.info(
-        "POST /v1/chat/completions: model=%s stream=%s", body.model, body.stream
+        "POST /v1/chat/completions: model=%s stream=%s agent=%s",
+        body.model,
+        body.stream,
+        agent_service is not None,
     )
 
     if body.response_format and body.response_format.type != "text":
         raise UnsupportedFeatureError(
             f"response_format type '{body.response_format.type}' is not supported. Only 'text' is accepted."
         )
+
+    if agent_service is not None:
+        if body.stream:
+            raise UnsupportedFeatureError(
+                "Agent orchestration does not support streaming yet. "
+                "Set 'stream': false or disable ENABLE_AGENT_ORCHESTRATION."
+            )
+        messages = convert_messages(body.messages)
+        agent_response = await agent_service.achat(messages)
+        return agent_response_to_openai(agent_response, body.model)
 
     kwargs = build_llm_kwargs(body, config.default_model)
 

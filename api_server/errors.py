@@ -4,6 +4,15 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from agent_orchestration.exceptions import (
+    AgentError,
+    ApprovalNotFoundError,
+    CheckpointNotFoundError,
+    PlanningError,
+    ToolExecutionError,
+    ToolNotFoundError,
+    ToolValidationError,
+)
 from llm.exceptions import LLMError, ProviderError, TimeoutError
 
 logger = logging.getLogger(__name__)
@@ -71,6 +80,49 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def llm_error_handler(request: Request, exc: LLMError) -> JSONResponse:
         logger.error("LLM error: %s", exc)
         return _error_response(500, "An LLM error occurred.", "llm_error")
+
+    @app.exception_handler(ToolNotFoundError)
+    async def tool_not_found_handler(
+        request: Request, exc: ToolNotFoundError
+    ) -> JSONResponse:
+        return _error_response(400, str(exc), "tool_not_found")
+
+    @app.exception_handler(ToolValidationError)
+    async def tool_validation_handler(
+        request: Request, exc: ToolValidationError
+    ) -> JSONResponse:
+        return _error_response(400, str(exc), "tool_validation_error")
+
+    @app.exception_handler(PlanningError)
+    async def planning_error_handler(
+        request: Request, exc: PlanningError
+    ) -> JSONResponse:
+        logger.error("Planning error: %s", exc)
+        return _error_response(500, str(exc), "planning_error")
+
+    @app.exception_handler(ToolExecutionError)
+    async def tool_execution_handler(
+        request: Request, exc: ToolExecutionError
+    ) -> JSONResponse:
+        logger.error("Tool execution error: %s", exc)
+        return _error_response(500, str(exc), "tool_execution_error")
+
+    @app.exception_handler(ApprovalNotFoundError)
+    async def approval_not_found_handler(
+        request: Request, exc: ApprovalNotFoundError
+    ) -> JSONResponse:
+        return _error_response(404, str(exc), "approval_not_found")
+
+    @app.exception_handler(CheckpointNotFoundError)
+    async def checkpoint_not_found_handler(
+        request: Request, exc: CheckpointNotFoundError
+    ) -> JSONResponse:
+        return _error_response(404, str(exc), "checkpoint_not_found")
+
+    @app.exception_handler(AgentError)
+    async def agent_error_handler(request: Request, exc: AgentError) -> JSONResponse:
+        logger.error("Agent error: %s", exc)
+        return _error_response(500, str(exc), "agent_error")
 
     @app.exception_handler(Exception)
     async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
