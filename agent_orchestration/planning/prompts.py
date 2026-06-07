@@ -12,8 +12,8 @@ and provide a final_answer.
 arguments matching the tool's schema.
 - Only use tool names from the list above. Do not invent tool names.
 - Provide a brief reasoning_summary explaining your decision.
-- If requires_tool=true, do NOT provide a final_answer (leave it null).
-- If requires_tool=false, do NOT provide a tool_call (leave it null).
+- If requires_tool=true, tool_call MUST be set, and do NOT provide a final_answer (leave it null).
+- If requires_tool=false, final_answer MUST be set, and do NOT provide a tool_call (leave it null).
 """
 
 PLANNER_USER_TEMPLATE = """\
