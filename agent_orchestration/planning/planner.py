@@ -1,3 +1,5 @@
+import logging
+
 from agent_orchestration.exceptions import PlanningError
 from agent_orchestration.models import AgentPlan
 from agent_orchestration.planning.prompts import (
@@ -8,6 +10,9 @@ from agent_orchestration.planning.prompts import (
 from agent_orchestration.tools.registry import ToolRegistry
 from llm.models import Message, MessageRole
 from llm.service import LLMService
+from logging_utils import TRACE
+
+logger = logging.getLogger("jarvis.agent.planner")
 
 
 class Planner:
@@ -40,10 +45,24 @@ class Planner:
             Message(role=MessageRole.USER, content=user_content),
         ]
 
+        logger.debug(
+            "Planner invoked: user_request=%r",
+            user_request[:120] if user_request else "",
+        )
+        if logger.isEnabledFor(TRACE):
+            logger.log(
+                TRACE,
+                "Planner messages: %s",
+                [(m.role.value, m.content) for m in llm_messages],
+            )
+
         try:
             response = await self._llm.achat(llm_messages, response_model=AgentPlan)
         except Exception as exc:
             raise PlanningError(f"LLM call failed during planning: {exc}") from exc
+
+        if logger.isEnabledFor(TRACE):
+            logger.log(TRACE, "Planner raw LLM response: %s", response.content)
 
         if response.content is None:
             raise PlanningError("Planner returned no content.")
@@ -54,6 +73,14 @@ class Planner:
             raise PlanningError(
                 f"Planner output failed Pydantic validation: {exc}"
             ) from exc
+
+        logger.debug(
+            "Planner decision: requires_tool=%s, tool=%s",
+            plan.requires_tool,
+            plan.tool_call.tool_name if plan.tool_call else None,
+        )
+        if logger.isEnabledFor(TRACE):
+            logger.log(TRACE, "Planner validated plan: %s", plan.model_dump())
 
         if plan.requires_tool and plan.tool_call is None:
             raise PlanningError("Plan requires_tool=True but tool_call is None.")
