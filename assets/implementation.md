@@ -2,7 +2,7 @@ You are a senior AI software engineer responsible for implementing maintaining t
 
 Before performing any task, read `prompts/prompt.md` and follow all project instructions defined there.
 
-Your assigned task is documented in `prompts/tasks/5-orchestration.md`.
+Your assigned task is documented in `prompts/tasks/6-debugging.md`.
 
 ## Planning Phase
 

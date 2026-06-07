@@ -235,6 +235,76 @@ Existing direct LLM streaming (`ENABLE_AGENT_ORCHESTRATION=false`) is unaffected
 
 ---
 
+## Debug Logging
+
+### Logger hierarchy
+
+```
+jarvis.agent           root agent logger
+jarvis.agent.graph     graph node instrumentation (start/complete/duration/state transitions)
+jarvis.agent.planner   planner decisions and LLM calls
+jarvis.agent.tools     tool selection, arguments, results, duration
+jarvis.agent.approval  approval requests, decisions, checkpoint state
+```
+
+### INFO behavior (default)
+
+Only operational metadata is logged at INFO and above:
+
+```
+Received chat request
+Selected provider / model
+Tool execution started / completed
+Request completed
+```
+
+No prompt content, tool arguments, or response text is logged at INFO.
+
+### DEBUG behavior
+
+```
+jarvis.agent.graph:    Node started / completed / duration for every node
+jarvis.agent.planner:  User request (truncated), planner decision (requires_tool, tool_name)
+jarvis.agent.tools:    Tool selected, arguments, execution duration
+jarvis.agent.approval: Approval requested (id, tool, risk level), decision (approved/rejected)
+```
+
+Example:
+```
+[DEBUG] jarvis.agent.planner  Planner decision: requires_tool=True, tool=web_search
+[DEBUG] jarvis.agent.tools    Tool selected: web_search
+[DEBUG] jarvis.agent.tools    Tool execution complete: web_search, duration: 120ms
+[DEBUG] jarvis.agent.approval Approval requested: id=abc123, tool=send_email, risk_level=EXTERNAL_WRITE
+```
+
+### TRACE behavior
+
+```
+jarvis.agent.graph:    State before node, state after node, state diff (changed keys)
+jarvis.agent.planner:  Full planner messages, raw LLM response, validated plan JSON
+jarvis.agent.tools:    Full tool request payload, full tool response
+jarvis.agent.approval: Pending tool call dict, checkpoint state, stored/resumed graph state
+```
+
+Example:
+```
+[TRACE] jarvis.agent.graph  State before plan: {'conversation_id': 'x', 'messages': [...], ...}
+[TRACE] jarvis.agent.graph  State diff plan: {'plan': 'NoneType -> AgentPlan', ...}
+```
+
+### Lazy logging
+
+All call sites use `%s`-style formatting:
+```python
+logger.debug("Planner decision: requires_tool=%s, tool=%s", plan.requires_tool, tool_name)
+```
+
+### Sensitive data redaction
+
+Redaction is applied globally via `logging_utils.RedactionFilter`. Email addresses, bearer tokens, API keys, passwords, and cookies are masked before any log handler emits the record. Redaction is enabled by default and can be disabled via `REDACT_SENSITIVE_DATA=false`.
+
+---
+
 ## Known Limitations
 
 1. **In-memory stores only** — all state is lost on restart. Not safe for multi-worker.

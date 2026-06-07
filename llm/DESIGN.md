@@ -341,6 +341,52 @@ llm = LLMService(config, provider=RetryingProvider(OllamaProvider(config), max_r
 
 ---
 
+## Logging
+
+### Logger name
+
+All LLM module logging uses the `jarvis.llm` logger hierarchy.
+
+### DEBUG behavior
+
+At `LOG_LEVEL=DEBUG`, the following is logged per request:
+
+```
+LLM request: model, message count, tool names, structured output schema
+LLM response: finish_reason, tool_calls count, content length
+Stream started / Stream completed: model, chunk count, duration
+```
+
+Response content is **not** logged at DEBUG — only metadata.
+
+### TRACE behavior
+
+At `LOG_LEVEL=TRACE`, additionally logged:
+
+```
+Full messages list (all content)
+Raw provider request kwargs (model, options, format)
+Raw ollama_sdk.ChatResponse object
+Response content (full text)
+Token usage metadata (prompt_eval_count, eval_count)
+Every streaming chunk (content)
+```
+
+### Lazy logging
+
+All log calls use `%s`-style formatting to avoid string construction when the level is disabled:
+
+```python
+logger.debug("LLM request: model=%s, messages=%d", model, len(messages))
+# NOT: logger.debug(f"LLM request: model={model}")
+```
+
+### Sensitive data
+
+Redaction is applied globally via `RedactionFilter` (see `logging_utils/`). LLM messages may contain email addresses, API keys, or OAuth tokens — all are masked before reaching any log handler.
+
+---
+
 ## Current Implementation Status
 
 - [x] `LLMConfig` — env var loading with fail-fast validation
@@ -352,7 +398,8 @@ llm = LLMService(config, provider=RetryingProvider(OllamaProvider(config), max_r
 - [x] Structured output support
 - [x] `LLMService` with `chat`, `achat`, `generate`, `agenerate`, `stream_chat`
 - [x] Streaming support (`astream_chat` on `OllamaProvider`, `stream_chat` on `LLMService`)
-- [x] Unit tests (136 tests, all passing)
+- [x] DEBUG / TRACE logging via `jarvis.llm`
+- [x] Unit tests (all passing)
 - [ ] Retry / backoff support
 - [ ] Additional providers (OpenAI, Anthropic, etc.)
 - [ ] Embedding generation

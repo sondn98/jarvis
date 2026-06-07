@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
@@ -16,8 +17,9 @@ from llm.exceptions import (
 )
 from llm.models import ChatResponse, LLMStreamChunk, Message, ToolCall, ToolDefinition
 from llm.providers.base import BaseProvider
+from logging_utils import TRACE
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("jarvis.llm")
 
 
 def _to_ollama_message(message: Message) -> dict[str, Any]:
@@ -128,7 +130,27 @@ class OllamaProvider(BaseProvider):
         options = self._build_options(**kwargs)
         fmt = self._build_format(response_model)
 
-        logger.info("LLM request start: model=%s", model)
+        logger.debug(
+            "LLM request: model=%s, messages=%d, tools=%s, schema=%s",
+            model,
+            len(messages),
+            [t.name for t in tools] if tools else None,
+            response_model.__name__ if response_model else None,
+        )
+        if logger.isEnabledFor(TRACE):
+            logger.log(
+                TRACE,
+                "LLM full messages: %s",
+                [_to_ollama_message(m) for m in messages],
+            )
+            logger.log(
+                TRACE,
+                "LLM request kwargs: model=%s options=%s format=%s",
+                model,
+                options,
+                fmt,
+            )
+
         try:
             raw = self._client.chat(
                 model=model,
@@ -148,7 +170,22 @@ class OllamaProvider(BaseProvider):
             raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
 
         response = _build_chat_response(raw, response_model)
-        logger.info("LLM request complete: finish_reason=%s", response.finish_reason)
+        logger.debug(
+            "LLM response: finish_reason=%s, tool_calls=%d, content_len=%s",
+            response.finish_reason,
+            len(response.tool_calls),
+            len(response.content) if response.content else 0,
+        )
+        if logger.isEnabledFor(TRACE):
+            logger.log(TRACE, "LLM raw response: %s", raw)
+            logger.log(TRACE, "LLM response content: %s", response.content)
+            if hasattr(raw, "prompt_eval_count"):
+                logger.log(
+                    TRACE,
+                    "Token usage: prompt=%s eval=%s",
+                    getattr(raw, "prompt_eval_count", None),
+                    getattr(raw, "eval_count", None),
+                )
         return response
 
     async def achat(
@@ -164,7 +201,27 @@ class OllamaProvider(BaseProvider):
         options = self._build_options(**kwargs)
         fmt = self._build_format(response_model)
 
-        logger.info("LLM async request start: model=%s", model)
+        logger.debug(
+            "LLM async request: model=%s, messages=%d, tools=%s, schema=%s",
+            model,
+            len(messages),
+            [t.name for t in tools] if tools else None,
+            response_model.__name__ if response_model else None,
+        )
+        if logger.isEnabledFor(TRACE):
+            logger.log(
+                TRACE,
+                "LLM full messages: %s",
+                [_to_ollama_message(m) for m in messages],
+            )
+            logger.log(
+                TRACE,
+                "LLM request kwargs: model=%s options=%s format=%s",
+                model,
+                options,
+                fmt,
+            )
+
         try:
             raw = await self._async_client.chat(
                 model=model,
@@ -184,9 +241,22 @@ class OllamaProvider(BaseProvider):
             raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
 
         response = _build_chat_response(raw, response_model)
-        logger.info(
-            "LLM async request complete: finish_reason=%s", response.finish_reason
+        logger.debug(
+            "LLM async response: finish_reason=%s, tool_calls=%d, content_len=%s",
+            response.finish_reason,
+            len(response.tool_calls),
+            len(response.content) if response.content else 0,
         )
+        if logger.isEnabledFor(TRACE):
+            logger.log(TRACE, "LLM raw response: %s", raw)
+            logger.log(TRACE, "LLM response content: %s", response.content)
+            if hasattr(raw, "prompt_eval_count"):
+                logger.log(
+                    TRACE,
+                    "Token usage: prompt=%s eval=%s",
+                    getattr(raw, "prompt_eval_count", None),
+                    getattr(raw, "eval_count", None),
+                )
         return response
 
     def list_models(self) -> list[str]:
@@ -224,7 +294,9 @@ class OllamaProvider(BaseProvider):
         ollama_tools = [_to_ollama_tool(t) for t in tools] if tools else None
         options = self._build_options(**kwargs)
 
-        logger.info("LLM stream request start: model=%s", model)
+        logger.debug("Stream started: model=%s", model)
+        t0 = time.monotonic()
+        chunk_count = 0
         try:
             response = await self._async_client.chat(
                 model=model,
@@ -234,6 +306,11 @@ class OllamaProvider(BaseProvider):
                 stream=True,
             )
             async for chunk in response:
+                chunk_count += 1
+                if logger.isEnabledFor(TRACE):
+                    logger.log(
+                        TRACE, "Stream chunk %d: %r", chunk_count, chunk.message.content
+                    )
                 yield LLMStreamChunk(
                     content=chunk.message.content or "",
                     done=chunk.done or False,
@@ -252,4 +329,10 @@ class OllamaProvider(BaseProvider):
             logger.error("Unexpected provider stream error: %s", exc)
             raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
         else:
-            logger.info("LLM stream request complete: model=%s", model)
+            duration_ms = (time.monotonic() - t0) * 1000
+            logger.debug(
+                "Stream completed: model=%s, chunks=%d, duration=%.0fms",
+                model,
+                chunk_count,
+                duration_ms,
+            )
