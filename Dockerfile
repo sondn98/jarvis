@@ -23,6 +23,7 @@ COPY main.py ./
 COPY api_server ./api_server
 COPY llm ./llm
 COPY agent_orchestration ./agent_orchestration
+COPY logging_utils ./logging_utils
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
