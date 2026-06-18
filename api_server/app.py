@@ -18,6 +18,7 @@ from agent_orchestration.tools.gmail import (
     GmailSendEmailTool,
 )
 from agent_orchestration.tools.registry import ToolRegistry
+from agent_orchestration.tools.web_fetch import WebFetchTool
 from agent_orchestration.tools.web_search import WebSearchTool
 from api_server.config import APIServerConfig
 from api_server.errors import register_exception_handlers
@@ -37,6 +38,14 @@ def _build_agent_service(llm_service: LLMService) -> AgentService:
     class _StubWebSearch:
         async def search(self, query: str, max_results: int = 5):
             return []
+
+    class _StubWebFetch:
+        async def fetch(self, url: str):
+            from agent_orchestration.tools.backends import WebFetchResult
+
+            return WebFetchResult(
+                url=url, content="(web_fetch not configured)", status_code=200
+            )
 
     class _StubGmail:
         async def search_messages(self, query: str, max_results: int = 10):
@@ -84,11 +93,13 @@ def _build_agent_service(llm_service: LLMService) -> AgentService:
             return CalendarDeleteResult(event_id=event_id, status="not_configured")
 
     web_backend = _StubWebSearch()
+    web_fetch_backend = _StubWebFetch()
     gmail_backend = _StubGmail()
     calendar_backend = _StubCalendar()
 
     registry = ToolRegistry()
     registry.register(WebSearchTool(web_backend))
+    registry.register(WebFetchTool(web_fetch_backend))
     registry.register(GmailSearchMessagesTool(gmail_backend))
     registry.register(GmailReadMessageTool(gmail_backend))
     registry.register(GmailSendEmailTool(gmail_backend))

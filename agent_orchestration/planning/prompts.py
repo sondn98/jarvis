@@ -14,6 +14,9 @@ arguments matching the tool's schema.
 - Provide a brief reasoning_summary explaining your decision.
 - If requires_tool=true, tool_call MUST be set, and do NOT provide a final_answer (leave it null).
 - If requires_tool=false, final_answer MUST be set, and do NOT provide a tool_call (leave it null).
+- If the user's request cannot be fulfilled by any tool in the list above (for example, \
+accessing a URL when no URL-fetching tool is available), set requires_tool=false and \
+explain in final_answer that you are unable to perform the task with the available tools.
 """
 
 PLANNER_USER_TEMPLATE = """\

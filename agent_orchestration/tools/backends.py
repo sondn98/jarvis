@@ -9,6 +9,12 @@ class WebSearchResult(BaseModel):
     snippet: str
 
 
+class WebFetchResult(BaseModel):
+    url: str
+    content: str
+    status_code: int
+
+
 class GmailMessageSummary(BaseModel):
     message_id: str
     subject: str
@@ -62,6 +68,11 @@ class WebSearchBackend(Protocol):
     async def search(
         self, query: str, max_results: int = 5
     ) -> list[WebSearchResult]: ...
+
+
+@runtime_checkable
+class WebFetchBackend(Protocol):
+    async def fetch(self, url: str) -> WebFetchResult: ...
 
 
 @runtime_checkable
