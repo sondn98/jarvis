@@ -12,7 +12,6 @@ from agent_orchestration.exceptions import ToolNotFoundError, ToolValidationErro
 from agent_orchestration.graph import AgentGraph
 from agent_orchestration.models import AgentPlan, PendingToolCall, ToolResult
 from agent_orchestration.persistence.checkpoint_store import CheckpointStore
-from agent_orchestration.tools.backends import GmailSendResult
 from agent_orchestration.tools.base import BaseTool
 from agent_orchestration.tools.registry import ToolRegistry
 from agent_orchestration.tools.risk import ToolRiskLevel
@@ -22,6 +21,17 @@ from llm.models import ChatResponse, Message, MessageRole
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+class GmailSendResult(BaseModel):
+    """Local stand-in for a Gmail send result, used as a mock backend return value.
+
+    The real prototype Gmail backend was removed once MCP integration landed; these
+    graph tests only need a model with ``.model_dump()`` for the fake send_email.
+    """
+
+    message_id: str
+    status: str
 
 
 def _messages(text: str) -> list[Message]:

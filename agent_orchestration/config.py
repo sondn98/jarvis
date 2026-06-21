@@ -14,11 +14,12 @@ class AgentConfig(BaseSettings):
     )
 
     agent_enabled: bool = Field(default=True)
-    # Which tool backend set to wire up. Only "stub" is implemented today
-    # (empty / not_configured placeholders); real backends are a separate feature.
-    agent_backend: str = Field(default="stub")
     require_approval_for_sensitive_read: bool = Field(default=False)
     require_approval_for_external_write: bool = Field(default=True)
     require_approval_for_destructive: bool = Field(default=True)
     require_approval_for_unknown: bool = Field(default=True)
     enable_llm_risk_classifier: bool = Field(default=False)
+    # Path to the JSON config file describing remote MCP servers (mcpServers block).
+    # Parsed once at startup; servers are connected lazily on first tool use. When
+    # unset, no MCP servers are loaded.
+    mcp_config_path: str | None = Field(default=None)

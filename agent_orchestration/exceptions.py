@@ -28,3 +28,12 @@ class ApprovalNotFoundError(AgentError):
 
 class CheckpointNotFoundError(AgentError):
     """Raised when a graph checkpoint cannot be found for a conversation."""
+
+
+class MCPConfigError(AgentError):
+    """Raised when the MCP server config file is missing, malformed, or references
+    an undefined environment variable."""
+
+
+class MCPConnectionError(AgentError):
+    """Raised when an MCP server cannot be reached or fails to initialize."""

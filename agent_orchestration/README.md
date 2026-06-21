@@ -21,7 +21,8 @@ Or add it to your `.env` file. The existing `/v1/chat/completions` endpoint auto
 | Variable | Default | Description |
 |---|---|---|
 | `ENABLE_AGENT_ORCHESTRATION` | `false` | Enable agent mode on the chat endpoint |
-| `REQUIRE_APPROVAL_FOR_SENSITIVE_READ` | `false` | Require approval before Gmail/Calendar read operations |
+| `MCP_CONFIG_PATH` | _(unset)_ | Path to the MCP servers JSON config. When unset, the agent has no tools. See [Configuring MCP Tools](#configuring-mcp-tools). |
+| `REQUIRE_APPROVAL_FOR_SENSITIVE_READ` | `false` | Require approval before sensitive-read operations |
 | `REQUIRE_APPROVAL_FOR_EXTERNAL_WRITE` | `true` | Require approval before sending emails / creating events |
 | `REQUIRE_APPROVAL_FOR_DESTRUCTIVE` | `true` | Require approval before deleting events |
 | `REQUIRE_APPROVAL_FOR_UNKNOWN` | `true` | Require approval for tools with unknown risk |
@@ -51,9 +52,10 @@ curl http://localhost:8000/v1/chat/completions \
 
 ---
 
-## Example: Tool-Using Request (Web Search)
+## Example: Tool-Using Request
 
-Web search is `SAFE_READ_ONLY` and executes without approval:
+Tools come from configured MCP servers (see [Configuring MCP Tools](#configuring-mcp-tools)).
+A tool whose configured risk is `SAFE_READ_ONLY` executes without approval:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
@@ -64,7 +66,8 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-The agent plans `web_search`, executes it, and returns a grounded answer.
+The agent plans the matching MCP tool (e.g. `<server>.search`), executes it, and
+returns a grounded answer.
 
 ---
 
@@ -88,7 +91,7 @@ curl http://localhost:8000/v1/chat/completions \
   "choices": [{
     "message": {
       "role": "assistant",
-      "content": "I need your approval before doing this:\n\nTool: gmail_send_email\nArguments:\n{\n  \"to\": \"alice@example.com\",\n  \"subject\": \"Meeting tomorrow\",\n  \"body\": \"The meeting is tomorrow.\"\n}\n\nRisk: Tool 'gmail_send_email' has risk level: external_write\n\nReply with:\nAPPROVE a3f1c2d4e5\nor\nREJECT a3f1c2d4e5"
+      "content": "I need your approval before doing this:\n\nTool: gmail.send_email\nArguments:\n{\n  \"to\": \"alice@example.com\",\n  \"subject\": \"Meeting tomorrow\",\n  \"body\": \"The meeting is tomorrow.\"\n}\n\nRisk: Tool 'gmail.send_email' has risk level: external_write\n\nReply with:\nAPPROVE a3f1c2d4e5\nor\nREJECT a3f1c2d4e5"
     }
   }]
 }
@@ -120,43 +123,48 @@ To reject: reply with `REJECT a3f1c2d4e5`.
 
 ---
 
-## How to Add a New Tool
+## Configuring MCP Tools
 
-1. Create your args schema:
+Tools are supplied by external [MCP](https://modelcontextprotocol.io) servers over
+Streamable HTTP — Jarvis connects to them as an MCP client. Point `MCP_CONFIG_PATH`
+at a JSON file shaped like Claude Desktop's `mcpServers` block:
 
-```python
-from pydantic import BaseModel
-
-class _MyArgs(BaseModel):
-    query: str
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "url": "https://mcp.example.com/gmail/mcp",
+      "headers": {"Authorization": "Bearer ${GMAIL_MCP_TOKEN}"},
+      "default_risk_level": "external_write",
+      "tool_risk_levels": {"search_messages": "sensitive_read"}
+    }
+  }
+}
 ```
 
-2. Implement `BaseTool`:
+Per server:
 
-```python
-from agent_orchestration.tools.base import BaseTool
-from agent_orchestration.tools.risk import ToolRiskLevel
-from agent_orchestration.models import ToolResult
+- `url` (required) — the server's Streamable HTTP endpoint.
+- `headers` (optional) — sent on every request; `${VAR}` is expanded from the
+  process environment, so secrets stay in `.env` rather than in the JSON file.
+- `default_risk_level` (optional, default `unknown`) — risk applied to every tool
+  from this server (drives the approval policy above).
+- `tool_risk_levels` (optional) — per-tool risk overrides, keyed by the tool's
+  (un-namespaced) MCP name.
+- `timeout` (optional, default `30`) — per-request connect/call timeout in seconds.
 
-class MyTool(BaseTool):
-    name = "my_tool"
-    description = "Does something useful."
-    risk_level = ToolRiskLevel.SAFE_READ_ONLY
-    args_schema = _MyArgs
+The config file is parsed at startup; servers are contacted **lazily on the first
+agent request** (cached for the process lifetime). Each tool is registered under the
+namespaced name `<server>.<tool>` to avoid collisions. A server that is unreachable
+is skipped with a warning so it cannot take down the agent. No graph changes are
+needed — the planner automatically includes discovered tools in its prompt.
 
-    async def arun(self, arguments: dict) -> ToolResult:
-        # call your backend
-        output = "result"
-        return ToolResult(tool_name=self.name, arguments=arguments, output=output, success=True)
+Quick connectivity check against a server:
+
+```bash
+MCP_TEST_URL="https://your-server/mcp" MCP_TEST_AUTH="Bearer <token>" \
+    uv run python scripts/manual_mcp_check.py
 ```
-
-3. Register it in `api_server/app.py` inside `_build_agent_service()`:
-
-```python
-registry.register(MyTool(my_backend))
-```
-
-No graph changes needed. The planner automatically includes the new tool in its prompt.
 
 ---
 

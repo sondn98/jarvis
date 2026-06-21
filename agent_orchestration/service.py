@@ -4,6 +4,7 @@ from uuid import uuid4
 from agent_orchestration.approval.store import ApprovalStore
 from agent_orchestration.config import AgentConfig
 from agent_orchestration.graph import AgentGraph
+from agent_orchestration.mcp.manager import MCPManager
 from agent_orchestration.models import AgentResponse
 from agent_orchestration.persistence.checkpoint_store import CheckpointStore
 from agent_orchestration.state import AgentState
@@ -25,7 +26,10 @@ class AgentService:
         approval_store: ApprovalStore,
         checkpoint_store: CheckpointStore,
         config: AgentConfig,
+        mcp_manager: MCPManager | None = None,
     ) -> None:
+        self._registry = registry
+        self._mcp_manager = mcp_manager
         self._graph = AgentGraph(
             llm_service=llm_service,
             registry=registry,
@@ -42,6 +46,12 @@ class AgentService:
         **kwargs: Any,
     ) -> AgentResponse:
         cid = conversation_id or uuid4().hex
+
+        # Lazily connect to configured MCP servers and register their tools on the
+        # first request (cached for the process lifetime). Connections are not made
+        # at app startup.
+        if self._mcp_manager is not None:
+            await self._mcp_manager.ensure_ready(self._registry)
 
         initial_state = AgentState(
             conversation_id=cid,
