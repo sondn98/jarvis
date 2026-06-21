@@ -4,28 +4,11 @@ from fastapi import FastAPI
 
 from agent_orchestration.approval.store import ApprovalStore
 from agent_orchestration.config import AgentConfig
+from agent_orchestration.mcp.config import load_mcp_config
+from agent_orchestration.mcp.manager import MCPManager
 from agent_orchestration.persistence.checkpoint_store import CheckpointStore
 from agent_orchestration.service import AgentService
-from agent_orchestration.tools.calendar import (
-    CalendarCreateEventTool,
-    CalendarDeleteEventTool,
-    CalendarSearchEventsTool,
-    CalendarUpdateEventTool,
-)
-from agent_orchestration.tools.gmail import (
-    GmailReadMessageTool,
-    GmailSearchMessagesTool,
-    GmailSendEmailTool,
-)
-from agent_orchestration.tools.backends_stub import (
-    StubCalendarBackend,
-    StubGmailBackend,
-    StubWebFetchBackend,
-    StubWebSearchBackend,
-)
 from agent_orchestration.tools.registry import ToolRegistry
-from agent_orchestration.tools.web_fetch import WebFetchTool
-from agent_orchestration.tools.web_search import WebSearchTool
 from api_server.config import APIServerConfig
 from api_server.errors import register_exception_handlers
 from api_server.logging import configure_logging
@@ -38,45 +21,37 @@ from llm.service import LLMService
 logger = logging.getLogger(__name__)
 
 
-def _build_tool_registry(agent_config: AgentConfig) -> ToolRegistry:
-    """Build the tool registry for the configured backend set.
+def _build_mcp_manager(agent_config: AgentConfig) -> MCPManager | None:
+    """Build the MCP manager from the JSON config file, if one is configured.
 
-    Only the "stub" backend set is implemented today; real Web/Gmail/Calendar
-    backends are a separate feature.
+    The config file is parsed here at startup; MCP servers themselves are not
+    contacted until the first agent request (see MCPManager.ensure_ready).
     """
-    if agent_config.agent_backend != "stub":
-        raise ValueError(
-            f"Unsupported agent_backend {agent_config.agent_backend!r}; "
-            "only 'stub' is implemented."
-        )
-
-    web_backend = StubWebSearchBackend()
-    web_fetch_backend = StubWebFetchBackend()
-    gmail_backend = StubGmailBackend()
-    calendar_backend = StubCalendarBackend()
-
-    registry = ToolRegistry()
-    registry.register(WebSearchTool(web_backend))
-    registry.register(WebFetchTool(web_fetch_backend))
-    registry.register(GmailSearchMessagesTool(gmail_backend))
-    registry.register(GmailReadMessageTool(gmail_backend))
-    registry.register(GmailSendEmailTool(gmail_backend))
-    registry.register(CalendarSearchEventsTool(calendar_backend))
-    registry.register(CalendarCreateEventTool(calendar_backend))
-    registry.register(CalendarUpdateEventTool(calendar_backend))
-    registry.register(CalendarDeleteEventTool(calendar_backend))
-    return registry
+    if not agent_config.mcp_config_path:
+        return None
+    mcp_config = load_mcp_config(agent_config.mcp_config_path)
+    logger.info(
+        "Loaded MCP config from %s: %d server(s) configured.",
+        agent_config.mcp_config_path,
+        len(mcp_config.servers),
+    )
+    return MCPManager(mcp_config)
 
 
 def _build_agent_service(llm_service: LLMService) -> AgentService:
-    """Build AgentService with the configured tool backend set."""
+    """Build AgentService.
+
+    Tools are supplied entirely by MCP servers: the registry starts empty and is
+    populated lazily on first use from the configured MCP servers (see MCPManager).
+    """
     agent_config = AgentConfig()
     return AgentService(
         llm_service=llm_service,
-        registry=_build_tool_registry(agent_config),
+        registry=ToolRegistry(),
         approval_store=ApprovalStore(),
         checkpoint_store=CheckpointStore(),
         config=agent_config,
+        mcp_manager=_build_mcp_manager(agent_config),
     )
 
 

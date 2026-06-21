@@ -53,11 +53,12 @@ agent_orchestration/
     risk.py          ToolRiskLevel enum
     base.py          BaseTool (ABC)
     registry.py      ToolRegistry
-    backends.py      Protocol interfaces + result models
-    web_search.py    WebSearchTool
-    gmail.py         GmailSearchMessagesTool, GmailReadMessageTool, GmailSendEmailTool
-    calendar.py      CalendarSearchEventsTool, CalendarCreateEventTool,
-                     CalendarUpdateEventTool, CalendarDeleteEventTool
+
+  mcp/               MCP client integration (tools come from MCP servers)
+    config.py        MCPServerConfig/MCPConfig + load_mcp_config (mcpServers JSON)
+    client.py        Streamable HTTP connect / list_tools / call_tool
+    adapter.py       MCPTool(BaseTool) — wraps an MCP tool as a BaseTool
+    manager.py       MCPManager — lazy discovery + registration on first use
 
   adapters/
     openai_adapter.py  AgentResponse → OpenAI ChatCompletionResponse
@@ -129,17 +130,16 @@ Before any tool executes, in this order:
 
 ---
 
-## Tool Backend Design
+## Tool Source: MCP Servers
 
-Tools depend on Protocol interfaces, not concrete implementations:
-
-```python
-class WebSearchBackend(Protocol): ...
-class GmailBackend(Protocol): ...
-class CalendarBackend(Protocol): ...
-```
-
-The production `create_app()` injects stub backends. Replace them with real implementations without changing any tool or graph code.
+Tools are supplied by external MCP (Model Context Protocol) servers rather than
+implemented in-tree. The registry starts empty; on the first agent request,
+`MCPManager.ensure_ready` connects to each server configured in the `MCP_CONFIG_PATH`
+JSON file (Streamable HTTP), lists its tools, and registers each as an `MCPTool`
+(a `BaseTool` adapter) under the namespaced name `<server>.<tool>`. A server that is
+unreachable is skipped with a warning. The graph and planner are unchanged — they
+still consume `BaseTool` instances from the `ToolRegistry`. See
+`agent_orchestration/mcp/` and the project README for the config format.
 
 ---
 
@@ -310,7 +310,7 @@ Redaction is applied globally via `logging_utils.RedactionFilter`. Email address
 1. **In-memory stores only** — all state is lost on restart. Not safe for multi-worker.
 2. **No streaming** — agent mode returns an error on `stream=true`.
 3. **Single tool per plan** — the planner selects one tool per round. Multi-step planning loops back to `decide_next_step` after each tool result.
-4. **Stub backends** — web search, Gmail, and calendar tools use no-op stubs in production until real integrations are wired in.
+4. **MCP tools only** — all tools come from configured MCP servers; none are built in. With no `MCP_CONFIG_PATH` configured, the agent has no tools and answers directly.
 5. **No persistent memory** — conversation history is not stored between sessions.
 6. **Approval IDs are hex UUIDs** — they must be copied exactly into the reply. No fuzzy matching.
 7. **LLM risk classifier disabled** — `enable_llm_risk_classifier=True` has no effect in V1.
@@ -320,7 +320,7 @@ Redaction is applied globally via `logging_utils.RedactionFilter`. Email address
 ## Future Extension Points
 
 - **Persistent stores**: implement `ApprovalStore`, `CheckpointStore`, `SessionStore` against PostgreSQL/Redis/SQLite.
-- **Real backends**: replace stub classes in `create_app()` with real `GmailBackend`, `CalendarBackend`, `WebSearchBackend` implementations.
+- **More MCP servers**: add entries to the `MCP_CONFIG_PATH` JSON file; tools are discovered and registered automatically on next startup.
 - **Agent streaming**: stream reasoning updates and final answer chunks via `stream=true`.
 - **Memory**: add `MemoryRetriever` / `MemoryWriter` in the `load_context` node.
 - **LLM risk classifier**: enable via `enable_llm_risk_classifier=True` and implement a classifier node.
