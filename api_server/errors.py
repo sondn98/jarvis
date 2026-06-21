@@ -13,7 +13,7 @@ from agent_orchestration.exceptions import (
     ToolNotFoundError,
     ToolValidationError,
 )
-from llm.exceptions import LLMError, ProviderError, TimeoutError
+from llm.exceptions import LLMError, LLMTimeoutError, ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +69,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         logger.error("Provider error: %s", exc)
         return _error_response(502, "LLM provider returned an error.", "provider_error")
 
-    @app.exception_handler(TimeoutError)
+    @app.exception_handler(LLMTimeoutError)
     async def timeout_error_handler(
-        request: Request, exc: TimeoutError
+        request: Request, exc: LLMTimeoutError
     ) -> JSONResponse:
         logger.error("LLM request timed out: %s", exc)
         return _error_response(504, "LLM request timed out.", "timeout_error")

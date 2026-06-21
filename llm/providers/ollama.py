@@ -5,14 +5,16 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
+import httpx
 import ollama as ollama_sdk
 from pydantic import BaseModel, ValidationError
 
 from llm.config import LLMConfig
 from llm.exceptions import (
+    LLMError,
+    LLMTimeoutError,
     ProviderError,
     StructuredOutputError,
-    TimeoutError,
     ToolCallParsingError,
 )
 from llm.models import ChatResponse, LLMStreamChunk, Message, ToolCall, ToolDefinition
@@ -89,6 +91,23 @@ def _build_chat_response(
     )
 
 
+def _map_error(exc: Exception) -> LLMError:
+    """Map a raw exception from the Ollama SDK/transport to an LLM error.
+
+    Ollama is backed by httpx, so timeouts surface as ``httpx.TimeoutException``
+    (not the builtin ``TimeoutError``); both are translated to
+    ``LLMTimeoutError`` so the 504 path is reachable.
+    """
+    if isinstance(exc, ollama_sdk.ResponseError):
+        logger.error("Provider error: %s", exc)
+        return ProviderError(str(exc))
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        logger.error("Request timed out: %s", exc)
+        return LLMTimeoutError(str(exc))
+    logger.error("Unexpected provider error: %s", exc)
+    return ProviderError(f"Unexpected error from Ollama: {exc}")
+
+
 class OllamaProvider(BaseProvider):
     """LLM provider backed by the official Ollama Python SDK."""
 
@@ -117,21 +136,40 @@ class OllamaProvider(BaseProvider):
             return None
         return response_model.model_json_schema()
 
-    def chat(
+    def _prepare_request(
         self,
         messages: list[Message],
-        tools: list[ToolDefinition] | None = None,
-        response_model: type[BaseModel] | None = None,
+        tools: list[ToolDefinition] | None,
+        response_model: type[BaseModel] | None,
         **kwargs: Any,
-    ) -> ChatResponse:
+    ) -> tuple[
+        str,
+        list[dict[str, Any]],
+        list[dict[str, Any]] | None,
+        dict[str, Any],
+        dict[str, Any] | None,
+    ]:
         model = kwargs.get("model", self._config.default_model)
         ollama_messages = [_to_ollama_message(m) for m in messages]
         ollama_tools = [_to_ollama_tool(t) for t in tools] if tools else None
         options = self._build_options(**kwargs)
         fmt = self._build_format(response_model)
+        return model, ollama_messages, ollama_tools, options, fmt
 
+    def _log_request(
+        self,
+        model: str,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None,
+        response_model: type[BaseModel] | None,
+        options: dict[str, Any],
+        fmt: dict[str, Any] | None,
+        *,
+        label: str,
+    ) -> None:
         logger.debug(
-            "LLM request: model=%s, messages=%d, tools=%s, schema=%s",
+            "LLM %srequest: model=%s, messages=%d, tools=%s, schema=%s",
+            label,
             model,
             len(messages),
             [t.name for t in tools] if tools else None,
@@ -150,6 +188,41 @@ class OllamaProvider(BaseProvider):
                 options,
                 fmt,
             )
+
+    def _log_response(
+        self, response: ChatResponse, raw: ollama_sdk.ChatResponse, *, label: str
+    ) -> None:
+        logger.debug(
+            "LLM %sresponse: finish_reason=%s, tool_calls=%d, content_len=%s",
+            label,
+            response.finish_reason,
+            len(response.tool_calls),
+            len(response.content) if response.content else 0,
+        )
+        if logger.isEnabledFor(TRACE):
+            logger.log(TRACE, "LLM raw response: %s", raw)
+            logger.log(TRACE, "LLM response content: %s", response.content)
+            if hasattr(raw, "prompt_eval_count"):
+                logger.log(
+                    TRACE,
+                    "Token usage: prompt=%s eval=%s",
+                    getattr(raw, "prompt_eval_count", None),
+                    getattr(raw, "eval_count", None),
+                )
+
+    def chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None = None,
+        response_model: type[BaseModel] | None = None,
+        **kwargs: Any,
+    ) -> ChatResponse:
+        model, ollama_messages, ollama_tools, options, fmt = self._prepare_request(
+            messages, tools, response_model, **kwargs
+        )
+        self._log_request(
+            model, messages, tools, response_model, options, fmt, label=""
+        )
 
         try:
             raw = self._client.chat(
@@ -159,33 +232,11 @@ class OllamaProvider(BaseProvider):
                 format=fmt,
                 options=options,
             )
-        except ollama_sdk.ResponseError as exc:
-            logger.error("Provider error: %s", exc)
-            raise ProviderError(str(exc)) from exc
-        except TimeoutError as exc:
-            logger.error("Request timed out: %s", exc)
-            raise TimeoutError(str(exc)) from exc
         except Exception as exc:
-            logger.error("Unexpected provider error: %s", exc)
-            raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
+            raise _map_error(exc) from exc
 
         response = _build_chat_response(raw, response_model)
-        logger.debug(
-            "LLM response: finish_reason=%s, tool_calls=%d, content_len=%s",
-            response.finish_reason,
-            len(response.tool_calls),
-            len(response.content) if response.content else 0,
-        )
-        if logger.isEnabledFor(TRACE):
-            logger.log(TRACE, "LLM raw response: %s", raw)
-            logger.log(TRACE, "LLM response content: %s", response.content)
-            if hasattr(raw, "prompt_eval_count"):
-                logger.log(
-                    TRACE,
-                    "Token usage: prompt=%s eval=%s",
-                    getattr(raw, "prompt_eval_count", None),
-                    getattr(raw, "eval_count", None),
-                )
+        self._log_response(response, raw, label="")
         return response
 
     async def achat(
@@ -195,32 +246,12 @@ class OllamaProvider(BaseProvider):
         response_model: type[BaseModel] | None = None,
         **kwargs: Any,
     ) -> ChatResponse:
-        model = kwargs.get("model", self._config.default_model)
-        ollama_messages = [_to_ollama_message(m) for m in messages]
-        ollama_tools = [_to_ollama_tool(t) for t in tools] if tools else None
-        options = self._build_options(**kwargs)
-        fmt = self._build_format(response_model)
-
-        logger.debug(
-            "LLM async request: model=%s, messages=%d, tools=%s, schema=%s",
-            model,
-            len(messages),
-            [t.name for t in tools] if tools else None,
-            response_model.__name__ if response_model else None,
+        model, ollama_messages, ollama_tools, options, fmt = self._prepare_request(
+            messages, tools, response_model, **kwargs
         )
-        if logger.isEnabledFor(TRACE):
-            logger.log(
-                TRACE,
-                "LLM full messages: %s",
-                [_to_ollama_message(m) for m in messages],
-            )
-            logger.log(
-                TRACE,
-                "LLM request kwargs: model=%s options=%s format=%s",
-                model,
-                options,
-                fmt,
-            )
+        self._log_request(
+            model, messages, tools, response_model, options, fmt, label="async "
+        )
 
         try:
             raw = await self._async_client.chat(
@@ -230,33 +261,11 @@ class OllamaProvider(BaseProvider):
                 format=fmt,
                 options=options,
             )
-        except ollama_sdk.ResponseError as exc:
-            logger.error("Provider error: %s", exc)
-            raise ProviderError(str(exc)) from exc
-        except TimeoutError as exc:
-            logger.error("Request timed out: %s", exc)
-            raise TimeoutError(str(exc)) from exc
         except Exception as exc:
-            logger.error("Unexpected provider error: %s", exc)
-            raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
+            raise _map_error(exc) from exc
 
         response = _build_chat_response(raw, response_model)
-        logger.debug(
-            "LLM async response: finish_reason=%s, tool_calls=%d, content_len=%s",
-            response.finish_reason,
-            len(response.tool_calls),
-            len(response.content) if response.content else 0,
-        )
-        if logger.isEnabledFor(TRACE):
-            logger.log(TRACE, "LLM raw response: %s", raw)
-            logger.log(TRACE, "LLM response content: %s", response.content)
-            if hasattr(raw, "prompt_eval_count"):
-                logger.log(
-                    TRACE,
-                    "Token usage: prompt=%s eval=%s",
-                    getattr(raw, "prompt_eval_count", None),
-                    getattr(raw, "eval_count", None),
-                )
+        self._log_response(response, raw, label="async ")
         return response
 
     def list_models(self) -> list[str]:
@@ -289,10 +298,9 @@ class OllamaProvider(BaseProvider):
         tools: list[ToolDefinition] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[LLMStreamChunk]:
-        model = kwargs.get("model", self._config.default_model)
-        ollama_messages = [_to_ollama_message(m) for m in messages]
-        ollama_tools = [_to_ollama_tool(t) for t in tools] if tools else None
-        options = self._build_options(**kwargs)
+        model, ollama_messages, ollama_tools, options, _ = self._prepare_request(
+            messages, tools, None, **kwargs
+        )
 
         logger.debug("Stream started: model=%s", model)
         t0 = time.monotonic()
@@ -319,15 +327,8 @@ class OllamaProvider(BaseProvider):
                     finish_reason=chunk.done_reason if chunk.done else None,
                     raw=None,
                 )
-        except ollama_sdk.ResponseError as exc:
-            logger.error("Provider stream error: %s", exc)
-            raise ProviderError(str(exc)) from exc
-        except TimeoutError as exc:
-            logger.error("Stream request timed out: %s", exc)
-            raise
         except Exception as exc:
-            logger.error("Unexpected provider stream error: %s", exc)
-            raise ProviderError(f"Unexpected error from Ollama: {exc}") from exc
+            raise _map_error(exc) from exc
         else:
             duration_ms = (time.monotonic() - t0) * 1000
             logger.debug(

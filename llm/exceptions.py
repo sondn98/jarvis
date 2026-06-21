@@ -10,7 +10,7 @@ class ProviderError(LLMError):
     """Raised when the LLM provider returns an error or is unavailable."""
 
 
-class TimeoutError(LLMError):
+class LLMTimeoutError(LLMError):
     """Raised when a provider request times out."""
 
 

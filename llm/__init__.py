@@ -2,10 +2,10 @@ from llm.config import LLMConfig
 from llm.exceptions import (
     ConfigurationError,
     LLMError,
+    LLMTimeoutError,
     ProviderError,
     StreamingNotSupportedError,
     StructuredOutputError,
-    TimeoutError,
     ToolCallParsingError,
 )
 from llm.models import (
@@ -24,7 +24,7 @@ __all__ = [
     "LLMError",
     "ConfigurationError",
     "ProviderError",
-    "TimeoutError",
+    "LLMTimeoutError",
     "StructuredOutputError",
     "ToolCallParsingError",
     "StreamingNotSupportedError",

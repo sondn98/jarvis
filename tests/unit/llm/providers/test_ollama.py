@@ -183,10 +183,14 @@ class TestOllamaProviderChat:
             provider.chat([user_message])
 
     def test_timeout_raises(self, provider, user_message):
-        from llm.exceptions import TimeoutError as LLMTimeout
+        import httpx
 
-        provider._client.chat.side_effect = LLMTimeout("timed out")
-        with pytest.raises(LLMTimeout):
+        from llm.exceptions import LLMTimeoutError
+
+        # The Ollama SDK is backed by httpx; real timeouts surface as
+        # httpx.TimeoutException, which must be translated to LLMTimeoutError.
+        provider._client.chat.side_effect = httpx.TimeoutException("timed out")
+        with pytest.raises(LLMTimeoutError):
             provider.chat([user_message])
 
 

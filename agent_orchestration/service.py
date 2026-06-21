@@ -53,7 +53,7 @@ class AgentService:
             approval_request=None,
             approval_decision=None,
             final_response=None,
-            errors=[],
+            llm_kwargs=kwargs,
             _approval_detected=None,
         )
 

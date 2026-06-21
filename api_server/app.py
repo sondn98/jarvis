@@ -17,6 +17,12 @@ from agent_orchestration.tools.gmail import (
     GmailSearchMessagesTool,
     GmailSendEmailTool,
 )
+from agent_orchestration.tools.backends_stub import (
+    StubCalendarBackend,
+    StubGmailBackend,
+    StubWebFetchBackend,
+    StubWebSearchBackend,
+)
 from agent_orchestration.tools.registry import ToolRegistry
 from agent_orchestration.tools.web_fetch import WebFetchTool
 from agent_orchestration.tools.web_search import WebSearchTool
@@ -32,70 +38,22 @@ from llm.service import LLMService
 logger = logging.getLogger(__name__)
 
 
-def _build_agent_service(llm_service: LLMService) -> AgentService:
-    """Build AgentService with stub backends and default tool registry."""
+def _build_tool_registry(agent_config: AgentConfig) -> ToolRegistry:
+    """Build the tool registry for the configured backend set.
 
-    class _StubWebSearch:
-        async def search(self, query: str, max_results: int = 5):
-            return []
+    Only the "stub" backend set is implemented today; real Web/Gmail/Calendar
+    backends are a separate feature.
+    """
+    if agent_config.agent_backend != "stub":
+        raise ValueError(
+            f"Unsupported agent_backend {agent_config.agent_backend!r}; "
+            "only 'stub' is implemented."
+        )
 
-    class _StubWebFetch:
-        async def fetch(self, url: str):
-            from agent_orchestration.tools.backends import WebFetchResult
-
-            return WebFetchResult(
-                url=url, content="(web_fetch not configured)", status_code=200
-            )
-
-    class _StubGmail:
-        async def search_messages(self, query: str, max_results: int = 10):
-            return []
-
-        async def read_message(self, message_id: str):
-            from agent_orchestration.tools.backends import GmailMessage
-
-            return GmailMessage(
-                message_id=message_id, subject="", sender="", body="", date=""
-            )
-
-        async def send_email(self, to: str, subject: str, body: str, cc=None):
-            from agent_orchestration.tools.backends import GmailSendResult
-
-            return GmailSendResult(message_id="stub", status="not_configured")
-
-    class _StubCalendar:
-        async def search_events(self, query=None, time_min=None, time_max=None):
-            return []
-
-        async def create_event(self, payload):
-            from agent_orchestration.tools.backends import CalendarEvent
-
-            return CalendarEvent(
-                event_id="stub",
-                title=payload.title,
-                start=payload.start,
-                end=payload.end,
-            )
-
-        async def update_event(self, event_id, payload):
-            from agent_orchestration.tools.backends import CalendarEvent
-
-            return CalendarEvent(
-                event_id=event_id,
-                title=payload.title or "",
-                start=payload.start or "",
-                end=payload.end or "",
-            )
-
-        async def delete_event(self, event_id):
-            from agent_orchestration.tools.backends import CalendarDeleteResult
-
-            return CalendarDeleteResult(event_id=event_id, status="not_configured")
-
-    web_backend = _StubWebSearch()
-    web_fetch_backend = _StubWebFetch()
-    gmail_backend = _StubGmail()
-    calendar_backend = _StubCalendar()
+    web_backend = StubWebSearchBackend()
+    web_fetch_backend = StubWebFetchBackend()
+    gmail_backend = StubGmailBackend()
+    calendar_backend = StubCalendarBackend()
 
     registry = ToolRegistry()
     registry.register(WebSearchTool(web_backend))
@@ -107,13 +65,18 @@ def _build_agent_service(llm_service: LLMService) -> AgentService:
     registry.register(CalendarCreateEventTool(calendar_backend))
     registry.register(CalendarUpdateEventTool(calendar_backend))
     registry.register(CalendarDeleteEventTool(calendar_backend))
+    return registry
 
+
+def _build_agent_service(llm_service: LLMService) -> AgentService:
+    """Build AgentService with the configured tool backend set."""
+    agent_config = AgentConfig()
     return AgentService(
         llm_service=llm_service,
-        registry=registry,
+        registry=_build_tool_registry(agent_config),
         approval_store=ApprovalStore(),
         checkpoint_store=CheckpointStore(),
-        config=AgentConfig(),
+        config=agent_config,
     )
 
 

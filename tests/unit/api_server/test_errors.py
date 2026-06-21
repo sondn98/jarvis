@@ -6,7 +6,7 @@ from api_server.errors import (
     UnsupportedFeatureError,
     register_exception_handlers,
 )
-from llm.exceptions import LLMError, ProviderError, TimeoutError
+from llm.exceptions import LLMError, LLMTimeoutError, ProviderError
 
 
 def _app_with_route(exc_to_raise, raise_server_exceptions: bool = True):
@@ -45,7 +45,7 @@ def test_provider_error_returns_502():
 
 
 def test_timeout_error_returns_504():
-    client = _app_with_route(TimeoutError("timed out"))
+    client = _app_with_route(LLMTimeoutError("timed out"))
     resp = client.get("/test")
     assert resp.status_code == 504
     assert resp.json()["error"]["type"] == "timeout_error"

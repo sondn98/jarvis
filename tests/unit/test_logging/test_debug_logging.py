@@ -136,7 +136,6 @@ async def test_graph_debug_logs_final_answer(caplog: pytest.LogCaptureFixture) -
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
 
@@ -213,6 +212,27 @@ def test_sensitive_dict_key_redacted() -> None:
     assert result["password"] == "[REDACTED]"
     assert result["username"] == "alice"
     assert result["data"] == "ok"
+
+
+def test_nested_list_of_dicts_redacted() -> None:
+    # Mirrors logging a list of message dicts: nested sensitive keys and
+    # email strings must be redacted, not just top-level ones (L7 remediation).
+    result = redact(
+        [
+            {"role": "user", "api_key": "sk-secret", "content": "ping bob@example.com"},
+            {"role": "assistant", "content": "ok"},
+        ]
+    )
+    assert result[0]["api_key"] == "[REDACTED]"
+    assert "bob@example.com" not in result[0]["content"]
+    assert result[1]["content"] == "ok"
+
+
+def test_nested_tuple_redacted() -> None:
+    result = redact(({"password": "hunter2"}, "plain"))
+    assert isinstance(result, tuple)
+    assert result[0]["password"] == "[REDACTED]"
+    assert result[1] == "plain"
 
 
 def test_redaction_filter_modifies_record() -> None:
@@ -328,7 +348,6 @@ async def test_tool_execution_debug_logs(caplog: pytest.LogCaptureFixture) -> No
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
 
@@ -505,7 +524,6 @@ async def test_trace_logs_contain_state_transitions(
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
 
