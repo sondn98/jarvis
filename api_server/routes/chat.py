@@ -84,7 +84,13 @@ async def chat_completions(
                 "Set 'stream': false or disable ENABLE_AGENT_ORCHESTRATION."
             )
         messages = convert_messages(body.messages)
-        agent_response = await agent_service.achat(messages)
+        # Thread generation params (model/temperature/top_p/max_tokens) through to
+        # the planner and final-answer LLM calls. Pass default_model=None so only
+        # client-set params override the agent's LLMConfig defaults. Client-supplied
+        # `tools` are intentionally ignored in agent mode: the agent's own tool
+        # registry governs which tools are available.
+        agent_kwargs = build_llm_kwargs(body, None)
+        agent_response = await agent_service.achat(messages, **agent_kwargs)
         return agent_response_to_openai(agent_response, body.model)
 
     kwargs = build_llm_kwargs(body, config.default_model)

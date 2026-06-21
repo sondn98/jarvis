@@ -62,8 +62,8 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "llama3.2",
-    "messages": [{"role": "user", "content": "Hello!"}],
+    "model": "qwen3:2.5",
+    "messages": [{"role": "user", "content": "What is the current situation in the conflict between the United States and Iran?"}],
     "stream": true
   }'
 ```

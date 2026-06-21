@@ -50,6 +50,42 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check .
 
+  # ── types ─────────────────────────────────────────────────────────────────--
+  # Informational only for now: surfaces type findings on PRs without blocking
+  # the build. Flip continue-on-error to false once the existing findings are
+  # triaged (see prompts/tasks/7-tech-debt.md M7).
+  types:
+    name: Types (mypy, informational)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Python version
+        id: python-version
+        run: echo "version=$(cat .python-version)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.python-version.outputs.version }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Mypy
+        continue-on-error: true
+        run: uv run mypy
+
   # ── security ────────────────────────────────────────────────────────────────
   security:
     name: Security

@@ -50,7 +50,7 @@ SYS_PROMPT = PLANNER_SYSTEM_PROMPT.format(
 
 USER_PROMPT = PLANNER_USER_TEMPLATE.format(
     history="(none)",
-    user_request="Access and summary this page for me **https://en.wikipedia.org/wiki/X-ray**",
+    user_request="What's the current situation in the conflict between the United States and Iran?",
 )
 
 

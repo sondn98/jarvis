@@ -20,7 +20,7 @@ class Planner:
         self._llm = llm_service
         self._registry = registry
 
-    async def plan(self, messages: list[Message]) -> AgentPlan:
+    async def plan(self, messages: list[Message], **kwargs: object) -> AgentPlan:
         tools = self._registry.list_tools()
         tool_desc = format_tool_descriptions(tools)
 
@@ -57,7 +57,9 @@ class Planner:
             )
 
         try:
-            response = await self._llm.achat(llm_messages, response_model=AgentPlan)
+            response = await self._llm.achat(
+                llm_messages, response_model=AgentPlan, **kwargs
+            )
         except Exception as exc:
             raise PlanningError(f"LLM call failed during planning: {exc}") from exc
 

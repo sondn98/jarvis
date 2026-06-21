@@ -70,7 +70,8 @@ _SENSITIVE_KEYS: frozenset[str] = frozenset(
 
 
 def redact(value: Any) -> Any:
-    """Redact emails, bearer tokens, and key=value secrets from a string or dict."""
+    """Redact emails, bearer tokens, and key=value secrets, recursing into
+    dicts, lists, and tuples."""
     if isinstance(value, str):
         value = _EMAIL_RE.sub(lambda m: f"{m.group(1)}***@{m.group(3)}", value)
         value = _BEARER_RE.sub(lambda m: f"{m.group(1)}[REDACTED]", value)
@@ -81,6 +82,10 @@ def redact(value: Any) -> Any:
             k: "[REDACTED]" if k.lower() in _SENSITIVE_KEYS else redact(v)
             for k, v in value.items()
         }
+    if isinstance(value, list):
+        return [redact(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(redact(v) for v in value)
     return value
 
 

@@ -11,6 +11,10 @@ class APIServerConfig(BaseSettings):
 
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
+    # Precedence for "which model": the non-agent path uses the request's model,
+    # falling back to this APIServerConfig.default_model. The agent path uses the
+    # client's requested model, falling back to LLMConfig.default_model (the
+    # provider default). These are two independent settings by design.
     default_model: str | None = Field(default=None)
     api_key: str | None = Field(default=None)
     enable_api_key_auth: bool = Field(default=False)

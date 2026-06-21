@@ -1,5 +1,11 @@
 """LangGraph agent orchestration graph.
 
+Execution is single-step: the planner selects at most one tool, and after that
+tool runs, `execute_tool` clears `plan`/`selected_tool_call` so the next pass
+through `decide_next_step` always routes to `generate_final_answer`. There is no
+re-planning/iteration today (the edge back to `decide_next_step` exists but does
+not loop). Multi-step execution would require a re-planning node.
+
 Workflow:
     START
       ↓
@@ -14,7 +20,7 @@ Workflow:
                                └── tool    → validate_tool_call
                                                ↓
                                            risk_check
-                                             ├── safe → execute_tool → decide_next_step (loop)
+                                             ├── safe → execute_tool → generate_final_answer → END
                                              └── risky → create_approval_request
                                                            → save_checkpoint
                                                            → return_approval_message → END
@@ -35,7 +41,6 @@ from agent_orchestration.approval.policy import ApprovalPolicy
 from agent_orchestration.approval.store import ApprovalStore
 from agent_orchestration.config import AgentConfig
 from agent_orchestration.exceptions import (
-    ToolExecutionError,
     ToolValidationError,
 )
 from agent_orchestration.models import (
@@ -102,7 +107,7 @@ def _state_to_dict(state: AgentState) -> dict[str, Any]:
             else None
         ),
         "final_response": state.get("final_response"),
-        "errors": state.get("errors", []),
+        "llm_kwargs": state.get("llm_kwargs", {}),
         "_approval_detected": state.get("_approval_detected"),
     }
 
@@ -133,7 +138,7 @@ def _dict_to_state(data: dict[str, Any]) -> AgentState:
             else None
         ),
         final_response=data.get("final_response"),
-        errors=data.get("errors", []),
+        llm_kwargs=data.get("llm_kwargs", {}),
         _approval_detected=data.get("_approval_detected"),
     )
 
@@ -152,6 +157,7 @@ class AgentGraph:
         self._llm = llm_service
         self._registry = registry
         self._approval_store = approval_store
+        # Retained for future use; resume currently reads ApprovalRecord.graph_state.
         self._checkpoint_store = checkpoint_store
         self._config = config
         self._policy = ApprovalPolicy(config)
@@ -320,7 +326,9 @@ class AgentGraph:
 
     async def _plan(self, state: AgentState) -> AgentState:
         t0 = self._node_start("plan", state)
-        plan = await self._planner.plan(state["messages"])
+        plan = await self._planner.plan(
+            state["messages"], **state.get("llm_kwargs", {})
+        )
         result = {**state, "plan": plan, "selected_tool_call": plan.tool_call}
         self._node_end("plan", t0, state, result)
         return result
@@ -332,6 +340,8 @@ class AgentGraph:
         return state
 
     async def _decide_next_step(self, state: AgentState) -> AgentState:
+        # No-op node: exists purely as a trace/diagram anchor. The actual routing
+        # decision lives in the _route_decide_next_step conditional-edge function.
         t0 = self._node_start("decide_next_step", state)
         self._node_end("decide_next_step", t0, state, state)
         return state
@@ -340,12 +350,10 @@ class AgentGraph:
         t0 = self._node_start("validate_tool_call", state)
         tc = state.get("selected_tool_call")
         if tc is None:
-            result = {
-                **state,
-                "errors": [*state.get("errors", []), "No tool call in state."],
-            }
-            self._node_end("validate_tool_call", t0, state, result)
-            return result
+            # Defensive: routing only reaches this node when a tool call is set,
+            # but if a malformed plan ever lands here, fail consistently with the
+            # sibling validation errors below rather than silently continuing.
+            raise ToolValidationError("No tool call in state to validate.")
 
         tool = self._registry.get(tc.tool_name)  # raises ToolNotFoundError if missing
         try:
@@ -359,6 +367,8 @@ class AgentGraph:
         return state
 
     async def _risk_check(self, state: AgentState) -> AgentState:
+        # No-op node: exists purely as a trace/diagram anchor. The actual risk
+        # routing decision lives in the _route_risk_check conditional-edge function.
         t0 = self._node_start("risk_check", state)
         self._node_end("risk_check", t0, state, state)
         return state
@@ -383,10 +393,18 @@ class AgentGraph:
         t_tool = time.monotonic()
         try:
             result_val = await tool.arun(tc.arguments)
-        except ToolExecutionError:
-            raise
         except Exception as exc:
-            raise ToolExecutionError(f"Tool '{tc.tool_name}' failed: {exc}") from exc
+            # Degrade gracefully: a single tool failure must not abort the whole
+            # run. Capture it as a failed ToolResult so the final-answer node can
+            # surface it (see _FINAL_ANSWER_SYSTEM) instead of returning a 500.
+            _tools_logger.error("Tool '%s' failed: %s", tc.tool_name, exc)
+            result_val = ToolResult(
+                tool_name=tc.tool_name,
+                arguments=tc.arguments,
+                output="",
+                success=False,
+                error=str(exc),
+            )
 
         tool_duration_ms = (time.monotonic() - t_tool) * 1000
         _tools_logger.debug(
@@ -466,7 +484,10 @@ class AgentGraph:
             created_at=datetime.now(UTC),
         )
         self._approval_store.save(record)
-        self._checkpoint_store.save(state["conversation_id"], snapshot)
+        # Note: the checkpoint snapshot is persisted as ApprovalRecord.graph_state
+        # (read back by _load_checkpoint on resume). CheckpointStore is retained as
+        # wiring for a future single-source-of-truth store but is not written here
+        # to avoid two divergent copies of the same checkpoint.
         if _approval_logger.isEnabledFor(TRACE):
             _approval_logger.log(
                 TRACE,
@@ -500,7 +521,10 @@ class AgentGraph:
         # Build context from tool results for grounded final answer
         if tool_results:
             results_context = "\n\n".join(
-                f"Tool: {r.tool_name}\nResult: {r.output}" for r in tool_results
+                f"Tool: {r.tool_name}\nResult: {r.output}"
+                if r.success
+                else f"Tool: {r.tool_name}\nError: {r.error}"
+                for r in tool_results
             )
         else:
             results_context = "(no tool results available)"
@@ -523,7 +547,7 @@ class AgentGraph:
             Message(role=MessageRole.USER, content=user_content),
         ]
 
-        response = await self._llm.achat(messages)
+        response = await self._llm.achat(messages, **state.get("llm_kwargs", {}))
         _graph_logger.debug(
             "Final answer generated: content_len=%d", len(response.content or "")
         )

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 from agent_orchestration.models import (
     AgentPlan,
@@ -25,6 +25,9 @@ class AgentState(TypedDict):
     approval_request: ApprovalRequest | None
     approval_decision: ApprovalDecision | None
     final_response: str | None
-    errors: list[str]
+    # Generation kwargs (temperature/top_p/max_tokens/model) threaded from the
+    # API request to the planner and final-answer LLM calls. Optional so existing
+    # state constructions stay valid; defaults to {} when absent.
+    llm_kwargs: NotRequired[dict[str, Any]]
     # Internal routing hint; not part of the public state contract
     _approval_detected: dict[str, Any] | None

@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from agent_orchestration.approval.store import ApprovalStore
 from agent_orchestration.config import AgentConfig
-from agent_orchestration.exceptions import ToolExecutionError, ToolNotFoundError
+from agent_orchestration.exceptions import ToolNotFoundError, ToolValidationError
 from agent_orchestration.graph import AgentGraph
 from agent_orchestration.models import AgentPlan, PendingToolCall, ToolResult
 from agent_orchestration.persistence.checkpoint_store import CheckpointStore
@@ -180,7 +180,6 @@ async def test_answer_without_tools():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)
@@ -213,7 +212,6 @@ async def test_safe_tool_executes_without_approval():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)
@@ -249,7 +247,6 @@ async def test_sensitive_read_no_approval_by_default():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)
@@ -283,7 +280,6 @@ async def test_sensitive_read_requires_approval_when_configured():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)
@@ -322,7 +318,6 @@ async def test_risky_tool_returns_approval_request_gmail_backend_zero_calls():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)
@@ -372,7 +367,6 @@ async def test_approve_resumes_and_calls_gmail_backend_once():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result1 = await g.run(state1)
@@ -390,7 +384,6 @@ async def test_approve_resumes_and_calls_gmail_backend_once():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result2 = await g.run(state2)
@@ -436,7 +429,6 @@ async def test_reject_skips_tool_execution():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result1 = await g.run(state1)
@@ -452,7 +444,6 @@ async def test_reject_skips_tool_execution():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result2 = await g.run(state2)
@@ -481,7 +472,6 @@ async def test_unknown_tool_raises():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     with pytest.raises(ToolNotFoundError):
@@ -489,7 +479,9 @@ async def test_unknown_tool_raises():
 
 
 @pytest.mark.asyncio
-async def test_tool_execution_failure_raises():
+async def test_tool_execution_failure_is_graceful():
+    """A tool failure must not abort the run; it becomes a failed ToolResult
+    and the run still produces a final answer (see H2 remediation)."""
     backend = MagicMock()
     backend.search = AsyncMock(side_effect=RuntimeError("network error"))
 
@@ -514,11 +506,42 @@ async def test_tool_execution_failure_raises():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
-    with pytest.raises(ToolExecutionError):
-        await g.run(state)
+    final_state = await g.run(state)
+
+    results = final_state["tool_results"]
+    assert len(results) == 1
+    assert results[0].success is False
+    assert "network error" in (results[0].error or "")
+    assert final_state["final_response"]
+
+
+@pytest.mark.asyncio
+async def test_validate_tool_call_raises_when_no_tool_call():
+    """A malformed plan reaching validate_tool_call with no tool call must fail
+    consistently (raise) rather than silently continuing (M4 remediation)."""
+    registry = ToolRegistry()
+    g = _graph(
+        _llm_for_plan(AgentPlan(requires_tool=False, final_answer="x")), registry
+    )
+
+    from agent_orchestration.state import AgentState
+
+    state = AgentState(
+        conversation_id="cX",
+        messages=_messages("hi"),
+        user_request=None,
+        plan=None,
+        selected_tool_call=None,
+        tool_results=[],
+        approval_request=None,
+        approval_decision=None,
+        final_response=None,
+        _approval_detected=None,
+    )
+    with pytest.raises(ToolValidationError):
+        await g._validate_tool_call(state)
 
 
 @pytest.mark.asyncio
@@ -547,7 +570,6 @@ async def test_calendar_delete_requires_approval():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)
@@ -583,7 +605,6 @@ async def test_web_search_no_approval_required():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)
@@ -631,7 +652,6 @@ async def test_final_answer_receives_tool_results_as_context():
         approval_request=None,
         approval_decision=None,
         final_response=None,
-        errors=[],
         _approval_detected=None,
     )
     result = await g.run(state)

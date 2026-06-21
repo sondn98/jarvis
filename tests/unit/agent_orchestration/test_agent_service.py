@@ -40,6 +40,35 @@ async def test_achat_returns_agent_response():
 
 
 @pytest.mark.asyncio
+async def test_generation_kwargs_threaded_to_llm():
+    """Generation params passed to achat must reach the planner/final-answer
+    LLM calls (M2 remediation)."""
+    plan = AgentPlan(requires_tool=False, final_answer="ok")
+    seen_kwargs = []
+
+    async def _achat(messages, **kwargs):
+        seen_kwargs.append(kwargs)
+        if kwargs.get("response_model"):
+            return ChatResponse(content=plan.model_dump_json(), finish_reason="stop")
+        return ChatResponse(content="ok", finish_reason="stop")
+
+    llm = MagicMock()
+    llm.achat = AsyncMock(side_effect=_achat)
+    service = AgentService(
+        llm_service=llm,
+        registry=ToolRegistry(),
+        approval_store=ApprovalStore(),
+        checkpoint_store=CheckpointStore(),
+        config=AgentConfig(),
+    )
+    messages = [Message(role=MessageRole.USER, content="Hi")]
+    await service.achat(messages, temperature=0.1, model="custom-model")
+
+    assert all(kw.get("temperature") == 0.1 for kw in seen_kwargs)
+    assert all(kw.get("model") == "custom-model" for kw in seen_kwargs)
+
+
+@pytest.mark.asyncio
 async def test_achat_with_risky_tool_sets_requires_approval():
     from agent_orchestration.models import ToolResult
     from agent_orchestration.tools.base import BaseTool
