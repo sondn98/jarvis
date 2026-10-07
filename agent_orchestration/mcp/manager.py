@@ -1,11 +1,13 @@
-"""Lazy discovery and registration of MCP tools.
+"""Discovery and registration of MCP tools.
 
-Connection lifecycle (Phase 1, Q5): the config file is parsed at startup, but MCP
-servers are *not* contacted until the first agent request. ``ensure_ready`` runs
-discovery exactly once (cached for the process lifetime), connecting to every
-configured server, listing its tools, and registering each as an ``MCPTool`` in the
-shared ``ToolRegistry``. A server that is unreachable or fails to initialize is
-skipped with a warning so one bad server cannot take down the agent.
+Connection lifecycle: the config file is parsed when the manager is built, and
+``ensure_ready`` performs discovery exactly once (cached for the process lifetime),
+connecting to every configured server, listing its tools, logging the inventory,
+and registering each as an ``MCPTool`` in the shared ``ToolRegistry``. The API
+server calls ``ensure_ready`` eagerly at startup so the loaded servers and tools are
+logged up front; it is also invoked before each agent request as an idempotent
+fallback. A server that is unreachable or fails to initialize is skipped with a
+warning so one bad server cannot take down the agent.
 """
 
 import asyncio
@@ -20,7 +22,7 @@ logger = logging.getLogger("jarvis.agent.mcp")
 
 
 class MCPManager:
-    """Owns the configured MCP servers and registers their tools on first use."""
+    """Owns the configured MCP servers and registers their tools (once)."""
 
     def __init__(self, config: MCPConfig) -> None:
         self._config = config
@@ -43,6 +45,14 @@ class MCPManager:
         async with self._lock:
             if self._ready:
                 return
+            if not self._config.servers:
+                logger.info("MCP: no servers configured.")
+                self._ready = True
+                return
+            logger.info(
+                "MCP: connecting to %d configured server(s)...",
+                len(self._config.servers),
+            )
             for server_name, server_config in self._config.servers.items():
                 await self._register_server(server_name, server_config, registry)
             self._ready = True
@@ -61,6 +71,12 @@ class MCPManager:
             logger.warning("Skipping MCP server '%s': %s", server_name, exc)
             return
 
+        logger.info(
+            "MCP server '%s' (%s): %d tool(s)",
+            server_name,
+            server_config.url,
+            len(tools),
+        )
         for tool in tools:
             adapter = MCPTool(
                 server_name=server_name,
@@ -70,9 +86,4 @@ class MCPManager:
                 input_schema=tool.inputSchema or {},
             )
             registry.register(adapter)
-            logger.info(
-                "Registered MCP tool '%s' (risk=%s) from server '%s'",
-                adapter.name,
-                adapter.risk_level.value,
-                server_name,
-            )
+            logger.info("  - %s (%s)", adapter.name, adapter.risk_level.value)

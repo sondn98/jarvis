@@ -133,13 +133,15 @@ Before any tool executes, in this order:
 ## Tool Source: MCP Servers
 
 Tools are supplied by external MCP (Model Context Protocol) servers rather than
-implemented in-tree. The registry starts empty; on the first agent request,
+implemented in-tree. The registry starts empty; at API server startup,
 `MCPManager.ensure_ready` connects to each server configured in the `MCP_CONFIG_PATH`
-JSON file (Streamable HTTP), lists its tools, and registers each as an `MCPTool`
-(a `BaseTool` adapter) under the namespaced name `<server>.<tool>`. A server that is
-unreachable is skipped with a warning. The graph and planner are unchanged — they
-still consume `BaseTool` instances from the `ToolRegistry`. See
-`agent_orchestration/mcp/` and the project README for the config format.
+JSON file (Streamable HTTP), lists its tools, logs the inventory, and registers each
+as an `MCPTool` (a `BaseTool` adapter) under the namespaced name `<server>.<tool>`.
+Discovery runs once and is cached for the process lifetime (also invoked before each
+request as an idempotent fallback). A server that is unreachable is skipped with a
+warning. The graph and planner are unchanged — they still consume `BaseTool`
+instances from the `ToolRegistry`. See `agent_orchestration/mcp/` and the project
+README for the config format.
 
 ---
 

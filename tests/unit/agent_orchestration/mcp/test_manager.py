@@ -51,6 +51,30 @@ async def test_unreachable_server_is_skipped(monkeypatch):
     assert names == {"good.ok"}
 
 
+async def test_ensure_ready_logs_servers_and_tools(monkeypatch, caplog):
+    async def fake_list_tools(server):
+        return [_tool("alpha"), _tool("beta")]
+
+    monkeypatch.setattr(client_module, "list_tools", fake_list_tools)
+
+    manager = MCPManager(_config("svc"))
+    with caplog.at_level("INFO", logger="jarvis.agent.mcp"):
+        await manager.ensure_ready(ToolRegistry())
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("connecting to 1 configured server(s)" in m for m in messages)
+    assert any("MCP server 'svc' (https://svc/mcp): 2 tool(s)" in m for m in messages)
+    assert any("- svc.alpha" in m for m in messages)
+    assert any("- svc.beta" in m for m in messages)
+
+
+async def test_ensure_ready_no_servers_logs_and_is_ready(caplog):
+    manager = MCPManager(MCPConfig(servers={}))
+    with caplog.at_level("INFO", logger="jarvis.agent.mcp"):
+        await manager.ensure_ready(ToolRegistry())
+    assert any("no servers configured" in r.getMessage() for r in caplog.records)
+
+
 async def test_ensure_ready_is_idempotent(monkeypatch):
     calls = 0
 

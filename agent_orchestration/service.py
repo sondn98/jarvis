@@ -38,6 +38,15 @@ class AgentService:
             config=config,
         )
 
+    async def warmup(self) -> None:
+        """Eagerly connect to configured MCP servers and register their tools.
+
+        Called once at API server startup so the loaded servers and their tools are
+        discovered and logged up front. Idempotent (see MCPManager.ensure_ready).
+        """
+        if self._mcp_manager is not None:
+            await self._mcp_manager.ensure_ready(self._registry)
+
     async def achat(
         self,
         messages: list[Message],

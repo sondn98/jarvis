@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -69,7 +71,15 @@ def create_app(
 
     resolved_llm = llm_service or LLMService(LLMConfig())
 
-    app = FastAPI(title="Jarvis API")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Eagerly discover MCP servers/tools at startup so the loaded inventory is
+        # logged before serving requests.
+        if app.state.agent_service is not None:
+            await app.state.agent_service.warmup()
+        yield
+
+    app = FastAPI(title="Jarvis API", lifespan=lifespan)
     app.state.config = resolved_config
     app.state.llm_service = resolved_llm
 

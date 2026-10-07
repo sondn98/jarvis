@@ -153,11 +153,22 @@ Per server:
   (un-namespaced) MCP name.
 - `timeout` (optional, default `30`) — per-request connect/call timeout in seconds.
 
-The config file is parsed at startup; servers are contacted **lazily on the first
-agent request** (cached for the process lifetime). Each tool is registered under the
-namespaced name `<server>.<tool>` to avoid collisions. A server that is unreachable
-is skipped with a warning so it cannot take down the agent. No graph changes are
-needed — the planner automatically includes discovered tools in its prompt.
+The config file is parsed at startup, and servers are contacted **eagerly at
+startup**: each server and its discovered tools are logged, then cached for the
+process lifetime. Each tool is registered under the namespaced name
+`<server>.<tool>` to avoid collisions. A server that is unreachable is skipped with
+a warning so it cannot take down the agent. No graph changes are needed — the
+planner automatically includes discovered tools in its prompt.
+
+Startup logs the loaded inventory, for example:
+
+```
+INFO MCP: connecting to 2 configured server(s)...
+INFO MCP server 'gmail' (https://.../mcp): 3 tool(s)
+INFO   - gmail.search_messages (sensitive_read)
+INFO   - gmail.send_email (external_write)
+INFO   - gmail.read_message (sensitive_read)
+```
 
 Quick connectivity check against a server:
 

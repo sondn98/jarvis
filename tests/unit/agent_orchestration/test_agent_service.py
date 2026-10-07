@@ -29,6 +29,26 @@ def _make_service(plan: AgentPlan, final: str = "answer") -> AgentService:
 
 
 @pytest.mark.asyncio
+async def test_warmup_runs_mcp_discovery():
+    plan = AgentPlan(requires_tool=False, final_answer="ok")
+    service = _make_service(plan, "ok")
+    mcp_manager = MagicMock()
+    mcp_manager.ensure_ready = AsyncMock()
+    service._mcp_manager = mcp_manager
+
+    await service.warmup()
+
+    mcp_manager.ensure_ready.assert_awaited_once_with(service._registry)
+
+
+@pytest.mark.asyncio
+async def test_warmup_noop_without_mcp_manager():
+    service = _make_service(AgentPlan(requires_tool=False, final_answer="ok"))
+    # No MCP manager configured -> warmup must not raise.
+    await service.warmup()
+
+
+@pytest.mark.asyncio
 async def test_achat_returns_agent_response():
     plan = AgentPlan(requires_tool=False, final_answer="Hello!")
     service = _make_service(plan, "Hello!")
