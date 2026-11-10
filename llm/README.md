@@ -175,8 +175,9 @@ All configuration is read from environment variables (or a `.env` file in the pr
 
 | Variable | Default | Description |
 |---|---|---|
-| `DEFAULT_MODEL` | *(required)* | Model name passed to Ollama (e.g. `llama3.2`) |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `DEFAULT_MODEL` | *(required)* | A [LiteLLM model string](https://docs.litellm.ai/docs/providers), e.g. `gemini/gemini-2.5-flash`, `ollama_chat/llama3.2`, `openai/gpt-4o-mini` |
+| `LLM_API_KEY` | *(unset)* | API key passed to LiteLLM as `api_key`. When unset, LiteLLM uses its own provider env vars (`GEMINI_API_KEY`, …). Never logged. |
+| `LLM_API_BASE` | *(unset)* | Endpoint passed to LiteLLM as `api_base`, e.g. `http://localhost:11434` for a local Ollama |
 | `REQUEST_TIMEOUT` | `60.0` | Per-request timeout in seconds |
 | `DEFAULT_TEMPERATURE` | `0.7` | Sampling temperature (0.0 – 2.0) |
 | `DEFAULT_TOP_P` | `0.9` | Top-p nucleus sampling (0.0 – 1.0) |
@@ -185,6 +186,25 @@ All configuration is read from environment variables (or a `.env` file in the pr
 `DEFAULT_MODEL` is the only required variable. All others have safe defaults.
 
 Invalid values raise `ConfigurationError` immediately at construction time.
+
+### LiteLLM behaviour to be aware of
+
+- **Unsupported params are dropped.** Every request sets `drop_params=True`, so if
+  a backend rejects e.g. `top_p`, LiteLLM silently drops it instead of failing.
+  DEBUG/TRACE logs still show what Jarvis sent.
+- **`import litellm` loads `.env` into `os.environ`.** LiteLLM calls
+  `dotenv.load_dotenv()` at import (unless `LITELLM_MODE` is set to something other
+  than `DEV`). Every `.env` value therefore becomes a process env var: native
+  provider keys in `.env` (e.g. `GEMINI_API_KEY`) reach LiteLLM, `${VAR}` in
+  `mcp.json` can resolve from `.env`, and local test runs see `.env` values. CI has
+  no `.env`.
+- **Remote cost map at import.** By default LiteLLM fetches its model price map
+  from GitHub at import, falling back to the bundled copy on failure. Export
+  `LITELLM_LOCAL_MODEL_COST_MAP=True` to skip the request (e.g. offline).
+- **Model listing.** `list_models()` / `GET /v1/models` return
+  `litellm.get_valid_models()`: LiteLLM's inference from provider API keys present
+  in the process environment. Keys given only via `LLM_API_KEY`, and local Ollama
+  models, are not reflected. An empty list is a valid result.
 
 ---
 
@@ -205,5 +225,5 @@ Internal models (`Message`, `ChatResponse`, etc.) are Pydantic models. Add optio
 Pass keyword arguments to `chat` / `generate` to override defaults for a single call:
 
 ```python
-llm.generate("Hello", model="mistral", temperature=0.2, max_tokens=512)
+llm.generate("Hello", model="ollama_chat/mistral", temperature=0.2, max_tokens=512)
 ```

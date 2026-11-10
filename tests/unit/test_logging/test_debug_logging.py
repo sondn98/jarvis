@@ -154,24 +154,28 @@ async def test_graph_debug_logs_final_answer(caplog: pytest.LogCaptureFixture) -
 
 
 @pytest.mark.asyncio
-async def test_ollama_trace_logs_raw_response(caplog: pytest.LogCaptureFixture) -> None:
+async def test_litellm_trace_logs_raw_response(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     from llm.config import LLMConfig
     from llm.models import Message, MessageRole
-    from llm.providers.ollama import OllamaProvider
+    from llm.providers.litellm import LiteLLMProvider
 
     config = LLMConfig(default_model="test-model")
-    provider = OllamaProvider(config)
+    provider = LiteLLMProvider(config)
 
+    choice = MagicMock()
+    choice.message.content = "The answer is 42."
+    choice.message.tool_calls = None
+    choice.finish_reason = "stop"
     mock_raw = MagicMock()
-    mock_raw.message = MagicMock()
-    mock_raw.message.content = "The answer is 42."
-    mock_raw.message.tool_calls = None
-    mock_raw.done_reason = "stop"
-    mock_raw.prompt_eval_count = 10
-    mock_raw.eval_count = 20
+    mock_raw.choices = [choice]
+    mock_raw.usage.prompt_tokens = 10
+    mock_raw.usage.completion_tokens = 20
 
-    with patch.object(
-        provider._async_client, "chat", new=AsyncMock(return_value=mock_raw)
+    with patch(
+        "llm.providers.litellm.litellm_sdk.acompletion",
+        new=AsyncMock(return_value=mock_raw),
     ):
         with caplog.at_level(TRACE, logger="jarvis.llm"):
             messages = [Message(role=MessageRole.USER, content="What is 6x7?")]
@@ -409,17 +413,17 @@ def test_approval_store_debug_logs(caplog: pytest.LogCaptureFixture) -> None:
 async def test_streaming_debug_logs(caplog: pytest.LogCaptureFixture) -> None:
     from llm.config import LLMConfig
     from llm.models import Message, MessageRole
-    from llm.providers.ollama import OllamaProvider
+    from llm.providers.litellm import LiteLLMProvider
 
     config = LLMConfig(default_model="test-model")
-    provider = OllamaProvider(config)
+    provider = LiteLLMProvider(config)
 
     def _make_chunk(content: str, done: bool = False) -> MagicMock:
+        choice = MagicMock()
+        choice.delta.content = content
+        choice.finish_reason = "stop" if done else None
         c = MagicMock()
-        c.message = MagicMock()
-        c.message.content = content
-        c.done = done
-        c.done_reason = "stop" if done else None
+        c.choices = [choice]
         c.model = "test-model"
         return c
 
@@ -428,8 +432,9 @@ async def test_streaming_debug_logs(caplog: pytest.LogCaptureFixture) -> None:
         yield _make_chunk(" world")
         yield _make_chunk("!", done=True)
 
-    with patch.object(
-        provider._async_client, "chat", new=AsyncMock(return_value=_fake_stream())
+    with patch(
+        "llm.providers.litellm.litellm_sdk.acompletion",
+        new=AsyncMock(return_value=_fake_stream()),
     ):
         with caplog.at_level(logging.DEBUG, logger="jarvis.llm"):
             messages = [Message(role=MessageRole.USER, content="Hi")]

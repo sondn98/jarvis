@@ -10,16 +10,16 @@ The `llm` module is the single, centralized access point for all LLM interaction
 - `LLMConfig` — Pydantic-settings-based configuration loaded from environment variables with fail-fast validation
 - `Message`, `MessageRole`, `ToolDefinition`, `ToolCall`, `ChatResponse`, `LLMStreamChunk` — provider-agnostic Pydantic models that form the canonical message format for the entire application
 - `BaseProvider` — a minimal abstract interface isolating the rest of the application from provider-specific code
-- `OllamaProvider` — the only concrete provider, backed by the official Ollama Python SDK; supports both batch and streaming modes
+- `LiteLLMProvider` — the only concrete provider, backed by the LiteLLM SDK; `DEFAULT_MODEL` can be any LiteLLM model string (`gemini/...`, `ollama_chat/...`, `openai/...`); supports both batch and streaming modes
 - Custom exception hierarchy (`LLMError`, `ConfigurationError`, `ProviderError`, `TimeoutError`, `StructuredOutputError`, `ToolCallParsingError`, `StreamingNotSupportedError`)
-- Tool calling: accepts `ToolDefinition` objects, translates them to Ollama format, parses responses into `ToolCall` objects
-- Structured output: accepts a Pydantic `response_model`, passes its JSON schema as the Ollama `format` parameter, validates and returns the result
+- Tool calling: accepts `ToolDefinition` objects, translates them to the OpenAI function-tool format LiteLLM expects, parses responses into `ToolCall` objects
+- Structured output: accepts a Pydantic `response_model`, passes it as LiteLLM's `response_format`, validates and returns the result
 - Streaming: async generator API (`stream_chat`) that yields `LLMStreamChunk` objects incrementally without buffering the full response
-- 51 unit tests covering config, models, service, and provider layers; all mocked, fast, and deterministic
+- Unit tests covering config, models, service, and provider layers; all mocked, fast, and deterministic
 
 **Known limitations:**
 
-- Only the Ollama provider is implemented
+- Only the LiteLLM provider is implemented; backend differences are delegated to LiteLLM
 - No retry logic — all retry decisions are delegated to callers
 - No connection pooling configuration beyond the SDK defaults
 - Streaming with structured output is not supported (incompatible with incremental delivery)
@@ -90,14 +90,14 @@ The `llm` module explicitly does not handle:
                            │
                            ▼
 ┌─────────────────────────────────────────────────────┐
-│                  OllamaProvider                     │
-│  - translates Message → ollama dict                 │
-│  - translates ToolDefinition → ollama tool dict     │
-│  - calls ollama.Client / AsyncClient                │
+│                  LiteLLMProvider                    │
+│  - translates Message → OpenAI-style dict           │
+│  - translates ToolDefinition → function tool dict   │
+│  - calls litellm.completion / acompletion           │
 │  - parses ToolCall objects from response            │
 │  - validates structured output via Pydantic         │
-│  - streams via AsyncClient.chat(stream=True)        │
-│  - maps SDK exceptions → internal exceptions        │
+│  - streams via acompletion(stream=True)             │
+│  - maps LiteLLM exceptions → internal exceptions    │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -108,7 +108,7 @@ The `llm` module explicitly does not handle:
 | `LLMConfig` | Load and validate configuration from env vars at startup |
 | `LLMService` | Public API surface; owns no logic beyond delegating to the provider |
 | `BaseProvider` | Abstract contract ensuring providers are interchangeable |
-| `OllamaProvider` | All Ollama-specific translation and SDK interaction |
+| `LiteLLMProvider` | All LiteLLM translation and SDK interaction |
 | Models (`models.py`) | Canonical, provider-agnostic data shapes used across the application |
 | Exceptions (`exceptions.py`) | Typed error surface; no raw SDK exceptions escape the provider |
 
@@ -118,9 +118,9 @@ The `llm` module explicitly does not handle:
 Caller
   → Message list
   → LLMService.chat()
-  → OllamaProvider.chat()
-      → _to_ollama_message() per message
-      → ollama.Client.chat()
+  → LiteLLMProvider.chat()
+      → _to_litellm_message() per message
+      → litellm.completion()
       → _build_chat_response()
   → ChatResponse
   → Caller
@@ -131,9 +131,9 @@ Caller
 ```
 Caller
   → messages + ToolDefinition list
-  → OllamaProvider
-      → _to_ollama_tool() per tool
-      → ollama.Client.chat(tools=...)
+  → LiteLLMProvider
+      → _to_litellm_tool() per tool
+      → litellm.completion(tools=...)
       → model returns tool_calls
       → _parse_tool_calls() → list[ToolCall]
   → ChatResponse(tool_calls=[...])
@@ -147,9 +147,8 @@ Caller
 ```
 Caller
   → messages + response_model (Pydantic class)
-  → OllamaProvider
-      → response_model.model_json_schema() → passed as format=
-      → ollama.Client.chat(format=schema)
+  → LiteLLMProvider
+      → litellm.completion(response_format=response_model)
       → model returns JSON string
       → response_model.model_validate_json(content)
       → re-serialized as model_dump_json()
@@ -163,14 +162,14 @@ Caller
 Caller
   → messages
   → LLMService.stream_chat()          ← async generator
-  → OllamaProvider.astream_chat()     ← async generator
-      → AsyncClient.chat(stream=True)
-      → async for sdk_chunk in response:
+  → LiteLLMProvider.astream_chat()    ← async generator
+      → litellm.acompletion(stream=True)
+      → async for sdk_chunk in response:   (chunks with empty choices are skipped)
           yield LLMStreamChunk(content, done, provider, model, finish_reason)
   → Caller receives chunks immediately as they arrive
 ```
 
-The `LLMStreamChunk` model is the only type that crosses the provider boundary during streaming. No Ollama SDK types are exposed to callers.
+The `LLMStreamChunk` model is the only type that crosses the provider boundary during streaming. No LiteLLM types are exposed to callers.
 
 ---
 
@@ -184,7 +183,7 @@ The `LLMStreamChunk` model is the only type that crosses the provider boundary d
 
 **Alternative:** Put structured output parsing and tool-call parsing in the service.
 
-**Tradeoff:** Logic in the provider makes the provider harder to swap, but it keeps provider-specific behavior (e.g. how Ollama structures tool responses) co-located with the Ollama code. This is appropriate since structured output format is inherently provider-specific.
+**Tradeoff:** Logic in the provider makes the provider harder to swap, but it keeps provider-specific behavior (e.g. how LiteLLM structures tool responses) co-located with the LiteLLM code. This is appropriate since structured output format is inherently provider-specific.
 
 ---
 
@@ -220,13 +219,13 @@ The `LLMStreamChunk` model is the only type that crosses the provider boundary d
 
 ---
 
-### 5. Structured output via Ollama's `format` parameter
+### 5. Structured output via LiteLLM's `response_format`
 
-**Chosen:** Pass `response_model.model_json_schema()` as the `format` argument to `ollama.Client.chat()`. Ollama constrains generation to valid JSON matching that schema. The response content is then parsed with `model_validate_json`.
+**Chosen:** Pass the Pydantic `response_model` class as `response_format` to `litellm.completion()`. LiteLLM converts it to each backend's native JSON-schema mechanism. The response content is then parsed with `model_validate_json`.
 
-**Why:** This is the native Ollama structured output mechanism and requires no post-hoc parsing of free text.
+**Why:** Keeps per-backend structured-output differences inside LiteLLM; Jarvis has no backend branches.
 
-**Tradeoff:** The schema is generated from the Pydantic model at call time (minor overhead). If the model returns malformed JSON despite the format constraint, `StructuredOutputError` is raised immediately — no retries.
+**Tradeoff:** How strictly the schema is enforced depends on the backend. If the model returns malformed JSON, `StructuredOutputError` is raised immediately — no retries.
 
 ---
 
@@ -242,11 +241,11 @@ The `LLMStreamChunk` model is the only type that crosses the provider boundary d
 
 ### 7. Streaming cancellation relies on SDK cleanup
 
-**Chosen:** No explicit resource cleanup code in `astream_chat`. When the caller breaks out of `async for`, Python calls `aclose()` on the generator chain, which in turn closes the Ollama `AsyncClient` response iterator. The Ollama SDK (backed by `httpx`) cancels the underlying HTTP request on stream close.
+**Chosen:** No explicit resource cleanup code in `astream_chat`. When the caller breaks out of `async for`, Python calls `aclose()` on the generator chain, which in turn closes the LiteLLM stream iterator, which closes the underlying HTTP response.
 
 **Why:** Adding manual cleanup would duplicate what the SDK already does correctly.
 
-**Tradeoff:** If the Ollama SDK changes its cleanup behavior, this assumption breaks. Documented here as the load-bearing assumption.
+**Tradeoff:** If LiteLLM changes its cleanup behavior, this assumption breaks. Documented here as the load-bearing assumption.
 
 ---
 
@@ -294,7 +293,7 @@ The stable chunk type yielded by all streaming APIs.
 class LLMStreamChunk(BaseModel):
     content: str          # incremental text; empty string on the final done=True chunk
     done: bool            # True on the last chunk
-    provider: str | None  # e.g. "ollama"
+    provider: str | None  # "litellm"
     model: str | None     # model name reported by the provider
     finish_reason: str | None  # set on the final chunk (e.g. "stop", "length")
     raw: dict | None      # reserved for provider metadata; currently always None
@@ -336,7 +335,7 @@ No changes to `LLMService`, `models.py`, or `exceptions.py` are required for a b
 Implement a `RetryingProvider(BaseProvider)` that wraps any `BaseProvider` and retries on `ProviderError` / `TimeoutError`. Inject it around the real provider:
 
 ```python
-llm = LLMService(config, provider=RetryingProvider(OllamaProvider(config), max_retries=3))
+llm = LLMService(config, provider=RetryingProvider(LiteLLMProvider(config), max_retries=3))
 ```
 
 ---
@@ -365,10 +364,10 @@ At `LOG_LEVEL=TRACE`, additionally logged:
 
 ```
 Full messages list (all content)
-Raw provider request kwargs (model, options, format)
-Raw ollama_sdk.ChatResponse object
+Raw provider request kwargs (model, api_base, sampling params, timeout, response_format; never api_key)
+Raw LiteLLM ModelResponse object
 Response content (full text)
-Token usage metadata (prompt_eval_count, eval_count)
+Token usage metadata (prompt_tokens, completion_tokens)
 Every streaming chunk (content)
 ```
 
@@ -393,15 +392,14 @@ Redaction is applied globally via `RedactionFilter` (see `logging_utils/`). LLM 
 - [x] Custom exception hierarchy
 - [x] Provider-agnostic Pydantic models (`Message`, `ToolDefinition`, `ToolCall`, `ChatResponse`)
 - [x] `BaseProvider` abstract interface
-- [x] `OllamaProvider` — sync and async chat
+- [x] `LiteLLMProvider` — sync and async chat
 - [x] Tool calling support
 - [x] Structured output support
 - [x] `LLMService` with `chat`, `achat`, `generate`, `agenerate`, `stream_chat`
-- [x] Streaming support (`astream_chat` on `OllamaProvider`, `stream_chat` on `LLMService`)
+- [x] Streaming support (`astream_chat` on `LiteLLMProvider`, `stream_chat` on `LLMService`)
 - [x] DEBUG / TRACE logging via `jarvis.llm`
 - [x] Unit tests (all passing)
 - [ ] Retry / backoff support
-- [ ] Additional providers (OpenAI, Anthropic, etc.)
 - [ ] Embedding generation
 - [ ] Token / usage accounting
 - [ ] Connection pooling configuration
@@ -414,26 +412,26 @@ Redaction is applied globally via `RedactionFilter` (see `logging_utils/`). LLM 
 
 Location: `tests/unit/llm/`
 
-All unit tests mock the Ollama SDK (`ollama.Client`, `ollama.AsyncClient`). Tests are fast, deterministic, and isolated from network state.
+All unit tests mock the LiteLLM SDK (`litellm.completion`, `litellm.acompletion`, `litellm.get_valid_models`). Tests are fast, deterministic, and isolated from network state.
 
 | File | What it covers |
 |---|---|
 | `test_config.py` | Valid config, missing required fields, invalid values |
 | `test_models.py` | Model construction, field validation, default values |
 | `test_service.py` | Delegation to provider, `generate` → `chat` wrapping, async paths |
-| `providers/test_ollama.py` | Message/tool translation, response parsing, error mapping, tool calls, structured output, async, streaming |
+| `providers/test_litellm.py` | Message/tool translation, response parsing, kwargs forwarding, error mapping, tool calls, structured output, async, streaming, model listing |
 
 ### Integration tests
 
 Location: `tests/integration/` (not yet implemented)
 
-Integration tests should use a real Ollama instance and cover end-to-end chat, tool calling, and structured output with an actual model.
+Integration tests should use a real model endpoint and cover end-to-end chat, tool calling, and structured output with an actual model.
 
 ### Critical test scenarios
 
 - Missing required configuration → `ValidationError`
 - Invalid config values (temperature, timeout, etc.) → `ConfigurationError`
-- `ProviderError` on `ollama.ResponseError`
+- `ProviderError` on LiteLLM API errors; `LLMTimeoutError` on `litellm.Timeout`
 - `StructuredOutputError` on malformed JSON or schema mismatch
 - `ToolCallParsingError` on malformed tool-call response
 - Async paths return identical results to sync paths
@@ -442,23 +440,22 @@ Integration tests should use a real Ollama instance and cover end-to-end chat, t
 
 ## Known Limitations
 
-1. **Single provider**: only Ollama is supported. Multi-provider routing or fallback is not implemented.
+1. **Single provider**: only LiteLLM is supported. Multi-provider routing, fallback, and LiteLLM's Router/Proxy are not used.
 2. **No retries**: the module raises immediately on failure. Callers own retry logic.
-3. **Structured output consistency**: Ollama's JSON-constrained generation is best-effort. The module raises `StructuredOutputError` on validation failure rather than attempting repair or retry.
+3. **Structured output consistency**: JSON-constrained generation is best-effort and backend-dependent. The module raises `StructuredOutputError` on validation failure rather than attempting repair or retry.
 4. **`ConfigurationError` vs `ValidationError`**: missing required env vars raise `ValidationError` (from pydantic); invalid values raise `ConfigurationError`. Callers should catch `(ValidationError, ConfigurationError)` for complete config error handling.
-5. **Tool call IDs**: Ollama does not return tool call IDs, so `ToolCall.id` is assigned a generated UUID. Callers must not depend on this ID being stable across equivalent requests.
+5. **Tool call IDs**: the backend's tool call ID is used when present; some backends omit it, in which case `ToolCall.id` is a generated UUID. Callers must not depend on this ID being stable across equivalent requests.
 6. **Streaming error visibility**: if an error occurs after the first streaming chunk is yielded, callers receive a truncated stream rather than a structured error object. This is consistent with how production LLM APIs behave and is inherent to the streaming model.
-7. **Streaming cancellation**: relies on Python async generator `aclose()` and the Ollama SDK (httpx) cleaning up the HTTP connection. No additional resource management is implemented.
+7. **Streaming cancellation**: relies on Python async generator `aclose()` and LiteLLM cleaning up the HTTP connection. No additional resource management is implemented.
 
 ---
 
 ## Future Roadmap
 
-1. **Integration tests** against a real Ollama instance
+1. **Integration tests** against a real model endpoint
 2. **Retry wrapper provider** for configurable backoff
-3. **Additional providers** (OpenAI, Anthropic) via `BaseProvider`
-4. **Token usage tracking** — surface `prompt_eval_count` / `eval_count` from Ollama in `ChatResponse`
-5. **Timeout via httpx/asyncio** — replace SDK-level timeout with explicit `asyncio.wait_for` for more reliable async cancellation
+3. **Token usage tracking** — surface LiteLLM `usage` in `ChatResponse`
+4. **Timeout via httpx/asyncio** — replace SDK-level timeout with explicit `asyncio.wait_for` for more reliable async cancellation
 
 ---
 
@@ -475,14 +472,14 @@ api_server /v1/chat/completions?stream=true
     ↓
 LLMService.stream_chat(messages)
     ↓
-OllamaProvider.astream_chat(messages)
+LiteLLMProvider.astream_chat(messages)
     ↓
-Ollama
+LiteLLM → configured backend (Gemini, Ollama, OpenAI, …)
 ```
 
 **What is already in place:**
 
-- `LLMStreamChunk` is provider-agnostic; no Ollama types reach the API layer
+- `LLMStreamChunk` is provider-agnostic; no LiteLLM types reach the API layer
 - The `/v1/chat/completions` endpoint accepts `"stream": true` and returns SSE formatted as `data: {json}\n\n` / `data: [DONE]\n\n`
 - The `ChatCompletionChunk` schema matches the OpenAI `chat.completion.chunk` object spec
 - Open WebUI expects exactly this format

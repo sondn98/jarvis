@@ -48,7 +48,7 @@ Open WebUI expects an OpenAI-compatible API. The `llm` module uses an internal m
 
 - Expose `/health`, `/v1/models`, `/v1/chat/completions`
 - Translate OpenAI requests ↔ internal `llm` models
-- Never call Ollama directly; always go through `LLMService`
+- Never call LiteLLM or a provider SDK directly; always go through `LLMService`
 - Optional authentication
 - Consistent error format
 
@@ -76,8 +76,8 @@ api_server
     dependencies.py ← FastAPI Depends providers
     ↓ llm.Message / llm.ToolDefinition
 llm
-    ↓ Ollama SDK
-Ollama
+    ↓ LiteLLM SDK
+Configured LLM backend
 ```
 
 Request flow for `POST /v1/chat/completions` (non-streaming):
@@ -205,9 +205,9 @@ All errors use:
 All tests are in `tests/unit/api_server/` and `tests/unit/main/`.
 
 - **Adapter tests**: pure unit tests; no HTTP, no mocks needed
-- **Route tests**: use `fastapi.testclient.TestClient` with a mocked `LLMService`; no Ollama required
+- **Route tests**: use `fastapi.testclient.TestClient` with a mocked `LLMService`; no live model required
 - **Error handler tests**: use a minimal FastAPI app with a route that raises; verify HTTP status and JSON shape
-- **Main tests**: use `importlib.reload` with `patch("api_server.app.LLMService")` to test `main.py` behaviour without env vars or Ollama
+- **Main tests**: use `importlib.reload` with `patch("api_server.app.LLMService")` to test `main.py` behaviour without env vars or a live model
 
 ---
 
