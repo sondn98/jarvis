@@ -9,7 +9,7 @@ Translate OpenAI-style HTTP requests into internal `llm` module calls, and trans
 ## Features
 
 - `GET /health` — liveness check
-- `GET /v1/models` — lists models available on the configured Ollama instance
+- `GET /v1/models` — lists models LiteLLM reports as available (see `llm/README.md`)
 - `POST /v1/chat/completions` — chat completion with tool-calling and streaming support (`"stream": true` returns SSE)
 - Optional API key authentication
 - Consistent OpenAI-style JSON error responses

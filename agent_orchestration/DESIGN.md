@@ -18,7 +18,7 @@ agent_orchestration
     └── tools (tool execution)
 ```
 
-`llm` is the only provider-facing module. `agent_orchestration` never calls Ollama or any provider SDK directly. `api_server` remains thin.
+`llm` is the only provider-facing module. `agent_orchestration` never calls LiteLLM or any provider SDK directly. `api_server` remains thin.
 
 ---
 

@@ -12,7 +12,7 @@ from llm.models import (
     ToolDefinition,
 )
 from llm.providers.base import BaseProvider
-from llm.providers.ollama import OllamaProvider
+from llm.providers.litellm import LiteLLMProvider
 
 
 class LLMService:
@@ -35,7 +35,7 @@ class LLMService:
 
     def __init__(self, config: LLMConfig, provider: BaseProvider | None = None) -> None:
         self._config = config
-        self._provider: BaseProvider = provider or OllamaProvider(config)
+        self._provider: BaseProvider = provider or LiteLLMProvider(config)
 
     def chat(
         self,

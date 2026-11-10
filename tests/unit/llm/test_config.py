@@ -8,7 +8,8 @@ from llm.exceptions import ConfigurationError
 def test_valid_config():
     config = LLMConfig(default_model="llama3.2")
     assert config.default_model == "llama3.2"
-    assert config.ollama_base_url == "http://localhost:11434"
+    assert config.llm_api_key is None
+    assert config.llm_api_base is None
     assert config.request_timeout == 60.0
     assert config.default_temperature == 0.7
     assert config.default_top_p == 0.9
@@ -18,14 +19,18 @@ def test_valid_config():
 def test_custom_values():
     config = LLMConfig(
         default_model="mistral",
-        ollama_base_url="http://myhost:11434",
+        llm_api_base="http://myhost:11434",
+        llm_api_key="sk-secret-value",
         request_timeout=30.0,
         default_temperature=0.5,
         default_top_p=0.8,
         default_max_tokens=1024,
     )
     assert config.default_model == "mistral"
-    assert config.ollama_base_url == "http://myhost:11434"
+    assert config.llm_api_base == "http://myhost:11434"
+    assert config.llm_api_key is not None
+    assert config.llm_api_key.get_secret_value() == "sk-secret-value"
+    assert "sk-secret-value" not in repr(config)
     assert config.request_timeout == 30.0
 
 

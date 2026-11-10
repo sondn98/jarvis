@@ -1,4 +1,4 @@
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from llm.exceptions import ConfigurationError
@@ -11,8 +11,9 @@ class LLMConfig(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    ollama_base_url: str = Field(default="http://localhost:11434")
     default_model: str
+    llm_api_key: SecretStr | None = None
+    llm_api_base: str | None = None
     request_timeout: float = Field(default=60.0)
     default_temperature: float = Field(default=0.7)
     default_top_p: float = Field(default=0.9)
