@@ -339,6 +339,21 @@ class TestListModels:
         with patch(f"{SDK}.get_valid_models", return_value=["gemini/a"]):
             assert await provider.alist_models() == ["gemini/a"]
 
+    async def test_alist_models_queries_configured_endpoint(self):
+        config = LLMConfig(
+            default_model="litellm_proxy/gemini-x",
+            llm_api_key="sk-proxy",
+            llm_api_base="https://proxy.example/v1",
+        )
+        with patch(f"{SDK}.get_valid_models", return_value=["litellm_proxy/a"]) as gvm:
+            assert await LiteLLMProvider(config).alist_models() == ["litellm_proxy/a"]
+        gvm.assert_called_once_with(
+            check_provider_endpoint=True,
+            custom_llm_provider="litellm_proxy",
+            api_key="sk-proxy",
+            api_base="https://proxy.example/v1",
+        )
+
     def test_list_models_empty_is_valid(self, provider):
         with patch(f"{SDK}.get_valid_models", return_value=[]):
             assert provider.list_models() == []
