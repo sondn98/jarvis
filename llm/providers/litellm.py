@@ -239,17 +239,40 @@ class LiteLLMProvider(BaseProvider):
         self._log_response(response, raw, label="async ")
         return response
 
+    def _list_models_kwargs(self) -> dict[str, Any]:
+        """Arguments for ``get_valid_models`` derived from our config.
+
+        Without them LiteLLM only looks at provider env vars (e.g.
+        ``OPENAI_API_KEY``) and silently returns ``[]`` when none are set —
+        it never queries the configured ``llm_api_base``.
+        """
+        try:
+            _, provider, _, _ = litellm_sdk.get_llm_provider(self._config.default_model)
+        except Exception:
+            provider = None
+        api_key = self._config.llm_api_key
+        return {
+            "check_provider_endpoint": True,
+            "custom_llm_provider": provider,
+            "api_key": api_key.get_secret_value() if api_key else None,
+            "api_base": self._config.llm_api_base,
+        }
+
     def list_models(self) -> list[str]:
         logger.info("Listing available LiteLLM models")
         try:
-            return list(litellm_sdk.get_valid_models())
+            return list(litellm_sdk.get_valid_models(**self._list_models_kwargs()))
         except Exception as exc:
             raise _map_error(exc) from exc
 
     async def alist_models(self) -> list[str]:
         logger.info("Listing available LiteLLM models (async)")
         try:
-            return list(await asyncio.to_thread(litellm_sdk.get_valid_models))
+            return list(
+                await asyncio.to_thread(
+                    litellm_sdk.get_valid_models, **self._list_models_kwargs()
+                )
+            )
         except Exception as exc:
             raise _map_error(exc) from exc
 
